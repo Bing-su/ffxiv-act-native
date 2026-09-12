@@ -1,0 +1,9 @@
+[package]
+name = "act-bridge-gen"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytes = "1"
+dotnetdll = "0.3"
+thiserror = "2"
