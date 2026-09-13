@@ -68,6 +68,20 @@ SDK의 Common DLL은 빌드 입력일 뿐 결과물 옆에 복사하지 않습�
 `bytes::Bytes`, 모델과 문자열은 소유 값입니다. Rust DLL의 대상 아키텍처는
 실행 중인 ACT 프로세스와 같아야 합니다.
 
+실행 가능한 최소 예제는 `examples/ffxiv-plugin`에 있습니다. 지역 변경을
+`%TEMP%\ActBridgeExample.log`에 기록하며, build script가 managed shim도 함께
+생성합니다.
+
+```powershell
+cargo build --manifest-path examples\ffxiv-plugin\Cargo.toml
+```
+
+`examples\ffxiv-plugin\target\debug`의 `ActBridgeExample.ACT.dll`과
+`ffxiv_plugin.dll`을 같은 플러그인 폴더에 복사한 뒤 ACT에는 managed DLL을
+추가합니다. SDK 경로가 기본값과 다르면 `ACT_BRIDGE_ACT_EXE`와
+`ACT_BRIDGE_COMMON_DLL` 환경 변수를 지정합니다. 릴리스 빌드는 `--release`를
+추가하고 `target\release`를 사용합니다.
+
 선택적 실제 SDK 테스트:
 
 ```powershell

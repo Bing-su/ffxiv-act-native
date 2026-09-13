@@ -461,9 +461,7 @@ namespace ActBridge.Generated
                 }
 
                 CommonBridge.Bind(subscriptions, repository);
-                string path = Path.Combine(
-                    Path.GetDirectoryName(typeof(Plugin).Assembly.Location),
-                    "__ACT_BRIDGE_NATIVE__.dll");
+                string path = Path.Combine(GetPluginDirectory(), "__ACT_BRIDGE_NATIVE__.dll");
                 nativeHandle = LoadLibrary(path);
                 if (nativeHandle == IntPtr.Zero)
                     throw new InvalidOperationException("native DLL load failed");
@@ -519,17 +517,24 @@ namespace ActBridge.Generated
             nativeHandle = IntPtr.Zero;
         }
 
+        private string GetPluginDirectory()
+        {
+            ActPluginData plugin = ActGlobals.oFormActMain.PluginGetSelfData(this);
+            if (plugin != null)
+                return plugin.pluginFile.DirectoryName;
+
+            throw new InvalidOperationException("could not find plugin path in ACT");
+        }
+
         private static bool FindServices(out object subscriptions, out object repository)
         {
             subscriptions = null;
             repository = null;
             foreach (ActPluginData item in ActGlobals.oFormActMain.ActPlugins)
             {
-                if (!string.Equals(
-                        item.pluginFile.Name,
-                        "FFXIV_ACT_Plugin.dll",
-                        StringComparison.OrdinalIgnoreCase)
-                    || item.pluginObj == null)
+                if (item.pluginObj == null
+                    || !item.cbEnabled.Checked
+                    || !item.lblPluginTitle.Text.StartsWith("FFXIV_ACT_Plugin"))
                     continue;
 
                 Type type = item.pluginObj.GetType();
