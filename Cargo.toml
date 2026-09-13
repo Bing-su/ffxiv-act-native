@@ -2,8 +2,8 @@
 name = "act-bridge-gen"
 version = "0.1.0"
 edition = "2024"
-license = "GPL-3.0-or-later"
 description = "Generate a .NET ACT shim for Rust FFXIV plugins"
+license = "BlueOak-1.0.0"
 
 [dependencies]
 bitflags = "2"
