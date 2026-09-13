@@ -4,18 +4,21 @@ use std::{
 
 use bytes::{Bytes, BytesMut};
 
-use crate::{RawHostApiV1, Status};
+use crate::{DecodeError, RawHostApiV1, Status};
 
 pub type PluginError = Box<dyn Error + Send + Sync + 'static>;
 pub type PluginResult<T> = Result<T, PluginError>;
 
 pub trait Plugin: Send + 'static {
+    /// Creates the plugin and selects the events it wants to receive.
     fn init(repository: Repository<'_>) -> PluginResult<(Self, SubscriptionSet)>
     where
         Self: Sized;
 
+    /// Handles one subscribed ACT event.
     fn on_event(&mut self, repository: Repository<'_>, event: Event<'_>) -> PluginResult<()>;
 
+    /// Releases resources before the managed shim unloads the plugin.
     fn shutdown(&mut self, repository: Repository<'_>) -> PluginResult<()>;
 }
 
@@ -52,6 +55,28 @@ pub enum EventKind {
     LogLine = 8,
     ParsedLogLine = 9,
     ProcessChanged = 10,
+}
+
+impl TryFrom<u32> for EventKind {
+    type Error = DecodeError;
+
+    /// Converts the event tag used by ABI v1 into its typed representation.
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::NetworkReceived),
+            1 => Ok(Self::NetworkSent),
+            2 => Ok(Self::CombatantAdded),
+            3 => Ok(Self::CombatantRemoved),
+            4 => Ok(Self::PrimaryPlayerChanged),
+            5 => Ok(Self::ZoneChanged),
+            6 => Ok(Self::PlayerStatsChanged),
+            7 => Ok(Self::PartyListChanged),
+            8 => Ok(Self::LogLine),
+            9 => Ok(Self::ParsedLogLine),
+            10 => Ok(Self::ProcessChanged),
+            _ => Err(DecodeError),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -94,41 +119,12 @@ pub enum Event<'a> {
 }
 
 impl<'a> Event<'a> {
+    /// Decodes an ABI v1 event payload.
     pub(crate) fn decode(kind: u32, payload: &'a [u8]) -> Result<Self, DecodeError> {
-        let kind = match kind {
-            0 => EventKind::NetworkReceived,
-            1 => EventKind::NetworkSent,
-            2 => EventKind::CombatantAdded,
-            3 => EventKind::CombatantRemoved,
-            4 => EventKind::PrimaryPlayerChanged,
-            5 => EventKind::ZoneChanged,
-            6 => EventKind::PlayerStatsChanged,
-            7 => EventKind::PartyListChanged,
-            8 => EventKind::LogLine,
-            9 => EventKind::ParsedLogLine,
-            10 => EventKind::ProcessChanged,
-            _ => return Err(DecodeError),
-        };
+        let kind = EventKind::try_from(kind)?;
         let mut cursor = Cursor(payload);
         Ok(match kind {
-            EventKind::NetworkReceived | EventKind::NetworkSent => {
-                let timestamp = cursor.i64()?;
-                let connection = cursor.str()?;
-                let bytes = cursor.bytes()?;
-                if kind == EventKind::NetworkReceived {
-                    Self::NetworkReceived {
-                        connection,
-                        timestamp,
-                        bytes,
-                    }
-                } else {
-                    Self::NetworkSent {
-                        connection,
-                        timestamp,
-                        bytes,
-                    }
-                }
-            }
+            EventKind::NetworkReceived | EventKind::NetworkSent => cursor.network_event(kind)?,
             EventKind::CombatantAdded => {
                 Self::CombatantAdded(cursor.combatant()?.ok_or(DecodeError)?)
             }
@@ -168,9 +164,6 @@ impl<'a> Event<'a> {
         })
     }
 }
-
-#[derive(Debug)]
-pub struct DecodeError;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NetworkBuff {
@@ -245,6 +238,7 @@ pub struct Player {
 
 struct Cursor<'a>(&'a [u8]);
 impl<'a> Cursor<'a> {
+    /// Removes and returns the next `len` bytes.
     fn take(&mut self, len: usize) -> Result<&'a [u8], DecodeError> {
         if self.0.len() < len {
             return Err(DecodeError);
@@ -289,6 +283,26 @@ impl<'a> Cursor<'a> {
     fn string(&mut self) -> Result<String, DecodeError> {
         Ok(self.str()?.to_owned())
     }
+    /// Decodes the shared wire shape of sent and received network events.
+    fn network_event(&mut self, kind: EventKind) -> Result<Event<'a>, DecodeError> {
+        let timestamp = self.i64()?;
+        let connection = self.str()?;
+        let bytes = self.bytes()?;
+        Ok(match kind {
+            EventKind::NetworkReceived => Event::NetworkReceived {
+                connection,
+                timestamp,
+                bytes,
+            },
+            EventKind::NetworkSent => Event::NetworkSent {
+                connection,
+                timestamp,
+                bytes,
+            },
+            _ => unreachable!("only network event kinds call this decoder"),
+        })
+    }
+    /// Decodes an optional player record.
     fn player(&mut self) -> Result<Option<Player>, DecodeError> {
         if self.u8()? == 0 {
             return Ok(None);
@@ -313,11 +327,12 @@ impl<'a> Cursor<'a> {
             local_content_id: self.u64()?,
         }))
     }
+    /// Decodes an optional combatant and its network buffs.
     fn combatant(&mut self) -> Result<Option<Combatant>, DecodeError> {
         if self.u8()? == 0 {
             return Ok(None);
         }
-        let mut value = Combatant {
+        Ok(Some(Combatant {
             id: self.u32()?,
             owner_id: self.u32()?,
             kind: self.u8()?,
@@ -351,27 +366,30 @@ impl<'a> Cursor<'a> {
             party_type: self.i32()?,
             address: self.i64()?,
             order: self.i32()?,
-            network_buffs: Vec::new(),
-        };
+            network_buffs: self.network_buffs()?,
+        }))
+    }
+
+    /// Decodes the length-prefixed network buff list.
+    fn network_buffs(&mut self) -> Result<Vec<Option<NetworkBuff>>, DecodeError> {
         let count = self.u32()? as usize;
-        value.network_buffs.reserve(count);
-        for _ in 0..count {
-            if self.u8()? == 0 {
-                value.network_buffs.push(None);
-                continue;
-            }
-            value.network_buffs.push(Some(NetworkBuff {
-                buff_id: self.u16()?,
-                buff_extra: self.u16()?,
-                timestamp_ticks: self.i64()?,
-                duration: self.f32()?,
-                actor_id: self.u32()?,
-                actor_name: self.string()?,
-                target_id: self.u32()?,
-                target_name: self.string()?,
-            }));
-        }
-        Ok(Some(value))
+        (0..count)
+            .map(|_| {
+                if self.u8()? == 0 {
+                    return Ok(None);
+                }
+                Ok(Some(NetworkBuff {
+                    buff_id: self.u16()?,
+                    buff_extra: self.u16()?,
+                    timestamp_ticks: self.i64()?,
+                    duration: self.f32()?,
+                    actor_id: self.u32()?,
+                    actor_name: self.string()?,
+                    target_id: self.u32()?,
+                    target_name: self.string()?,
+                }))
+            })
+            .collect()
     }
 }
 
@@ -389,6 +407,7 @@ pub enum RepositoryError {
 }
 
 impl<'a> Repository<'a> {
+    /// Wraps the host API for the duration of one plugin callback.
     pub(crate) fn new(host: &'a RawHostApiV1) -> Self {
         Self {
             host,
@@ -396,6 +415,7 @@ impl<'a> Repository<'a> {
         }
     }
 
+    /// Executes a raw managed repository query and returns its payload.
     pub fn query(&self, query: u32, request: &[u8]) -> Result<Bytes, RepositoryError> {
         let Some(query_fn) = self.host.query else {
             return Err(RepositoryError::Status(Status::NotInitialized));
@@ -444,12 +464,15 @@ impl<'a> Repository<'a> {
         Err(RepositoryError::Status(Status::BufferTooSmall))
     }
 
+    /// Returns the current player actor ID.
     pub fn current_player_id(&self) -> Result<u32, RepositoryError> {
         self.u32_query(1)
     }
+    /// Returns the current territory ID.
     pub fn current_territory_id(&self) -> Result<u32, RepositoryError> {
         self.u32_query(2)
     }
+    /// Returns the selected game language ID.
     pub fn selected_language(&self) -> Result<i32, RepositoryError> {
         let bytes = self.query(3, &[])?;
         bytes
@@ -458,21 +481,25 @@ impl<'a> Repository<'a> {
             .map(i32::from_le_bytes)
             .ok_or(RepositoryError::Malformed)
     }
+    /// Returns the detected game version.
     pub fn game_version(&self) -> Result<String, RepositoryError> {
         let bytes = self.query(4, &[])?;
         Cursor(&bytes)
             .string()
             .map_err(|_| RepositoryError::Malformed)
     }
+    /// Reports whether ACT can currently read the chat log.
     pub fn is_chat_log_available(&self) -> Result<bool, RepositoryError> {
         self.query(5, &[])?
             .first()
             .map(|v| *v != 0)
             .ok_or(RepositoryError::Malformed)
     }
+    /// Returns the attached game process ID.
     pub fn current_process_id(&self) -> Result<u32, RepositoryError> {
         self.u32_query(9)
     }
+    /// Returns the server timestamp in .NET ticks.
     pub fn server_timestamp_ticks(&self) -> Result<i64, RepositoryError> {
         let bytes = self.query(10, &[])?;
         bytes
@@ -481,6 +508,7 @@ impl<'a> Repository<'a> {
             .map(i64::from_le_bytes)
             .ok_or(RepositoryError::Malformed)
     }
+    /// Returns antivirus product names reported by the repository.
     pub fn antivirus_names(&self) -> Result<Vec<String>, RepositoryError> {
         let bytes = self.query(11, &[])?;
         let mut cursor = Cursor(&bytes);
@@ -489,6 +517,7 @@ impl<'a> Repository<'a> {
             .map(|_| cursor.string().map_err(|_| RepositoryError::Malformed))
             .collect()
     }
+    /// Returns the configured game region ID.
     pub fn game_region(&self) -> Result<u8, RepositoryError> {
         self.query(12, &[])?
             .first()
@@ -505,6 +534,7 @@ impl<'a> Repository<'a> {
             .ok_or(RepositoryError::Malformed)
     }
 
+    /// Returns the current combatant snapshot.
     pub fn combatants(&self) -> Result<Vec<Combatant>, RepositoryError> {
         let bytes = self.query(6, &[])?;
         let mut cursor = Cursor(&bytes);
@@ -519,6 +549,7 @@ impl<'a> Repository<'a> {
             .collect()
     }
 
+    /// Returns the current player stats, if a player is available.
     pub fn player(&self) -> Result<Option<Player>, RepositoryError> {
         let bytes = self.query(7, &[])?;
         Cursor(&bytes)
@@ -526,6 +557,7 @@ impl<'a> Repository<'a> {
             .map_err(|_| RepositoryError::Malformed)
     }
 
+    /// Returns the requested localized resource dictionary.
     pub fn resource_dictionary(
         &self,
         resource_type: i32,
@@ -569,6 +601,8 @@ mod tests {
             (SubscriptionSet::ZONE_CHANGED | SubscriptionSet::LOG_LINE)
                 .contains(SubscriptionSet::LOG_LINE)
         );
+        assert!(matches!(EventKind::try_from(5), Ok(EventKind::ZoneChanged)));
+        assert!(EventKind::try_from(u32::MAX).is_err());
     }
 
     #[test]

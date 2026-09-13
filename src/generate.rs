@@ -11,6 +11,13 @@ use dotscope::{
 };
 use sha1::{Digest, Sha1};
 
+use crate::GenerateError;
+
+const ACT_INPUT: &str = "Advanced Combat Tracker.exe";
+const COMMON_INPUT: &str = "FFXIV_ACT_Plugin.Common.dll";
+const SUBSCRIPTION_TYPE: &str = "FFXIV_ACT_Plugin.Common.IDataSubscription";
+const SHIM_TEMPLATE: &str = "managed shim template";
+const NATIVE_PLACEHOLDER: &str = "__ACT_BRIDGE_NATIVE__.dll";
 const COMMON_EVENTS: &[&str] = &[
     "NetworkReceived",
     "NetworkSent",
@@ -45,42 +52,15 @@ pub struct PluginConfig {
     pub native_dll_name: String,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum GenerateError {
-    #[error("{input} is not a valid .NET assembly: {message}")]
-    InvalidAssembly {
-        input: &'static str,
-        message: String,
-    },
-    #[error("{input} has no assembly manifest")]
-    MissingAssemblyManifest { input: &'static str },
-    #[error("required type {0} was not found")]
-    MissingType(&'static str),
-    #[error("{type_name} is missing required {member_kind} {member_name}")]
-    MissingMember {
-        type_name: &'static str,
-        member_kind: &'static str,
-        member_name: &'static str,
-    },
-    #[error("{type_name}.{member_name} has an ABI-incompatible signature")]
-    IncompatibleSignature {
-        type_name: &'static str,
-        member_name: &'static str,
-    },
-    #[error("invalid plugin configuration: {0}")]
-    InvalidConfig(&'static str),
-    #[error("could not write managed shim: {0}")]
-    Write(String),
-}
-
+/// Generates a managed ACT shim bound to the supplied native plugin DLL.
 pub fn generate(
     act_exe: &[u8],
     ffxiv_common: &[u8],
     config: &PluginConfig,
 ) -> Result<Vec<u8>, GenerateError> {
     validate_config(config)?;
-    let act = parse(act_exe, "Advanced Combat Tracker.exe")?;
-    let common = parse(ffxiv_common, "FFXIV_ACT_Plugin.Common.dll")?;
+    let act = parse(act_exe, ACT_INPUT)?;
+    let common = parse(ffxiv_common, COMMON_INPUT)?;
     validate_contracts(&act, &common)?;
     emit(&act, &common, config)
 }
@@ -92,6 +72,7 @@ fn parse(bytes: &[u8], input: &'static str) -> Result<CilObject, GenerateError> 
     })
 }
 
+/// Rejects names that cannot safely identify managed and native DLLs.
 fn validate_config(config: &PluginConfig) -> Result<(), GenerateError> {
     if config.assembly_name.is_empty() || config.assembly_name.contains(['/', '\\', '\0']) {
         return Err(GenerateError::InvalidConfig(
@@ -112,6 +93,7 @@ fn validate_config(config: &PluginConfig) -> Result<(), GenerateError> {
     Ok(())
 }
 
+/// Verifies the ACT and SDK members used by the managed shim.
 fn validate_contracts(act: &CilObject, common: &CilObject) -> Result<(), GenerateError> {
     let plugin = find_type(act, "Advanced_Combat_Tracker.IActPluginV1").ok_or(
         GenerateError::MissingType("Advanced_Combat_Tracker.IActPluginV1"),
@@ -131,16 +113,15 @@ fn validate_contracts(act: &CilObject, common: &CilObject) -> Result<(), Generat
         true,
     )?;
 
-    let subscription = find_type(common, "FFXIV_ACT_Plugin.Common.IDataSubscription").ok_or(
-        GenerateError::MissingType("FFXIV_ACT_Plugin.Common.IDataSubscription"),
-    )?;
+    let subscription = find_type(common, SUBSCRIPTION_TYPE)
+        .ok_or(GenerateError::MissingType(SUBSCRIPTION_TYPE))?;
     for name in COMMON_EVENTS {
         let event = subscription
             .events
             .iter()
             .find_map(|(_, event)| (event.name == *name).then_some(event))
             .ok_or(GenerateError::MissingMember {
-                type_name: "FFXIV_ACT_Plugin.Common.IDataSubscription",
+                type_name: SUBSCRIPTION_TYPE,
                 member_kind: "event",
                 member_name: name,
             })?;
@@ -148,7 +129,7 @@ fn validate_contracts(act: &CilObject, common: &CilObject) -> Result<(), Generat
             .event_type
             .upgrade()
             .ok_or(GenerateError::IncompatibleSignature {
-                type_name: "FFXIV_ACT_Plugin.Common.IDataSubscription",
+                type_name: SUBSCRIPTION_TYPE,
                 member_name: name,
             })?;
         let arity = match *name {
@@ -224,6 +205,7 @@ fn require_method(
     }
 }
 
+/// Writes validated identities and configured names into the shim template.
 fn emit(
     act: &CilObject,
     common: &CilObject,
@@ -231,35 +213,25 @@ fn emit(
 ) -> Result<Vec<u8>, GenerateError> {
     let act_identity = act
         .identity()
-        .ok_or(GenerateError::MissingAssemblyManifest {
-            input: "Advanced Combat Tracker.exe",
-        })?;
+        .ok_or(GenerateError::MissingAssemblyManifest { input: ACT_INPUT })?;
     let common_identity = common
         .identity()
         .ok_or(GenerateError::MissingAssemblyManifest {
-            input: "FFXIV_ACT_Plugin.Common.dll",
+            input: COMMON_INPUT,
         })?;
     let mut output = CilAssembly::from_bytes(
         include_bytes!("../managed/Shim.template.dll").to_vec(),
     )
     .map_err(|error| GenerateError::InvalidAssembly {
-        input: "managed shim template",
+        input: SHIM_TEMPLATE,
         message: error.to_string(),
     })?;
 
     replace_assembly_name(&mut output, &config.assembly_name)?;
     replace_assembly_reference(&mut output, "Advanced Combat Tracker", &act_identity)?;
     replace_assembly_reference(&mut output, "FFXIV_ACT_Plugin.Common", &common_identity)?;
-    replace_module_reference(
-        &mut output,
-        "__ACT_BRIDGE_NATIVE__.dll",
-        &config.native_dll_name,
-    )?;
-    replace_user_string(
-        &mut output,
-        "__ACT_BRIDGE_NATIVE__.dll",
-        &config.native_dll_name,
-    )?;
+    replace_module_reference(&mut output, NATIVE_PLACEHOLDER, &config.native_dll_name)?;
+    replace_user_string(&mut output, NATIVE_PLACEHOLDER, &config.native_dll_name)?;
     output.to_memory().map_err(write_error)
 }
 
@@ -273,19 +245,19 @@ fn replace_assembly_name(output: &mut CilAssembly, name: &str) -> Result<(), Gen
         .view()
         .tables()
         .ok_or(GenerateError::MissingAssemblyManifest {
-            input: "managed shim template",
+            input: SHIM_TEMPLATE,
         })?;
     let mut assembly = tables
         .table::<AssemblyRaw>()
         .and_then(|table| table.get(1).ok().flatten())
         .ok_or(GenerateError::MissingAssemblyManifest {
-            input: "managed shim template",
+            input: SHIM_TEMPLATE,
         })?;
     let mut module = tables
         .table::<ModuleRaw>()
         .and_then(|table| table.get(1).ok().flatten())
         .ok_or(GenerateError::MissingMember {
-            type_name: "managed shim template",
+            type_name: SHIM_TEMPLATE,
             member_kind: "module",
             member_name: "<Module>",
         })?;
@@ -369,7 +341,7 @@ fn replace_module_reference(
 ) -> Result<(), GenerateError> {
     let view = output.view();
     let strings = view.strings().ok_or(GenerateError::MissingMember {
-        type_name: "managed shim template",
+        type_name: SHIM_TEMPLATE,
         member_kind: "module reference",
         member_name: old_name,
     })?;
@@ -384,7 +356,7 @@ fn replace_module_reference(
             })
         })
         .ok_or(GenerateError::MissingMember {
-            type_name: "managed shim template",
+            type_name: SHIM_TEMPLATE,
             member_kind: "module reference",
             member_name: old_name,
         })?;
@@ -412,17 +384,16 @@ fn replace_user_string(
         .collect();
     if indexes.is_empty() {
         return Err(GenerateError::MissingMember {
-            type_name: "managed shim template",
+            type_name: SHIM_TEMPLATE,
             member_kind: "user string",
             member_name: old_value,
         });
     }
-    for index in indexes {
+    indexes.into_iter().try_for_each(|index| {
         output
             .userstring_update(index, new_value)
-            .map_err(write_error)?;
-    }
-    Ok(())
+            .map_err(write_error)
+    })
 }
 
 fn write_error(error: Error) -> GenerateError {

@@ -8,6 +8,7 @@
 
 mod abi;
 mod api;
+mod error;
 mod generate;
 
 pub use abi::{ABI_VERSION, RawClientApiV1, RawEventV1, RawHostApiV1, Status};
@@ -16,7 +17,8 @@ pub use api::{
     Repository, SubscriptionSet,
 };
 pub use bytes::Bytes;
-pub use generate::{GenerateError, PluginConfig, generate};
+pub use error::{DecodeError, GenerateError};
+pub use generate::{PluginConfig, generate};
 
 /// Export the single entry point expected by a generated managed shim.
 ///
