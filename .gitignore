@@ -24,3 +24,5 @@ rustc-ice-*.txt
 #.idea/
 Cargo.lock
 *.dll
+!managed/Shim.template.dll
+!managed/fixtures/FFXIV_ACT_Plugin.Common.dll

@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3"
+
+vars:
+  CSC: '{{ .WINDIR }}\Microsoft.NET\Framework\v4.0.30319\csc.exe'
+  ACT_EXE: '{{ .APPDATA }}\Advanced Combat Tracker\Advanced Combat Tracker.exe'
+
+tasks:
+  default:
+    deps: [test]
+
+  test:
+    deps: [fixture, shim]
+    cmds:
+      - cargo test
+
+  fixture:
+    cmds:
+      - '"{{ .CSC }}" /nologo /target:library /out:"managed\\fixtures\\Advanced Combat Tracker.exe" /reference:System.Windows.Forms.dll managed\\fixtures\\Act.cs'
+      - '"{{ .CSC }}" /nologo /target:library /out:managed\\fixtures\\FFXIV_ACT_Plugin.Common.dll managed\\fixtures\\Common.cs'
+
+  shim:
+    cmds:
+      - '"{{ .CSC }}" /nologo /target:library /out:managed\\Shim.template.dll /reference:"{{ .ACT_EXE }}" /reference:FFXIV_ACT_Plugin_SDK_3.0.3.0\\SDK\\FFXIV_ACT_Plugin.Common.dll /reference:System.Windows.Forms.dll managed\\Shim.cs'

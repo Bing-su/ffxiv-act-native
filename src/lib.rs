@@ -4,13 +4,16 @@
 //! `FFXIV_ACT_Plugin.Common.dll` from the official SDK.  It deliberately never
 //! reads `FFXIV_ACT_Plugin.dll`.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 mod abi;
 mod api;
 mod generate;
 
 pub use abi::{ABI_VERSION, RawClientApiV1, RawEventV1, RawHostApiV1, Status};
 pub use api::{
-    CallContext, Event, EventKind, Plugin, PluginError, PluginResult, Repository, SubscriptionSet,
+    Combatant, Event, EventKind, NetworkBuff, Player, Plugin, PluginError, PluginResult,
+    Repository, SubscriptionSet,
 };
 pub use bytes::Bytes;
 pub use generate::{GenerateError, PluginConfig, generate};

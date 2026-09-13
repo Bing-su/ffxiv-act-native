@@ -1,11 +1,12 @@
 use std::{
     ffi::c_void,
     panic::{AssertUnwindSafe, catch_unwind},
+    ptr::null_mut,
     slice,
     sync::{Mutex, OnceLock},
 };
 
-use crate::{CallContext, Event, Plugin, Repository};
+use crate::{Event, Plugin, Repository};
 
 pub const ABI_VERSION: u32 = 1;
 
@@ -90,9 +91,7 @@ impl<P: Plugin> ErasedPlugin for Running<P> {
             Ok(event) => event,
             Err(_) => return Status::InvalidArgument,
         };
-        let repository = Repository::new(host);
-        let context = CallContext::new(repository);
-        match self.0.on_event(context, event) {
+        match self.0.on_event(Repository::new(host), event) {
             Ok(()) => Status::Ok,
             Err(error) => {
                 report(host, &error.to_string());
@@ -102,8 +101,7 @@ impl<P: Plugin> ErasedPlugin for Running<P> {
     }
 
     fn shutdown(&mut self, host: &RawHostApiV1) -> Status {
-        let context = CallContext::new(Repository::new(host));
-        match self.0.shutdown(context) {
+        match self.0.shutdown(Repository::new(host)) {
             Ok(()) => Status::Ok,
             Err(error) => {
                 report(host, &error.to_string());
@@ -133,7 +131,7 @@ fn state() -> &'static Mutex<Option<State>> {
 /// to readable/writable ABI v1 structures that remain valid for this call.
 pub unsafe fn start<P: Plugin>(host: *const RawHostApiV1, client: *mut RawClientApiV1) -> Status {
     if host.is_null() && client.is_null() {
-        return unsafe { shutdown(std::ptr::null_mut()) };
+        return unsafe { shutdown(null_mut()) };
     }
     if host.is_null() || client.is_null() {
         return Status::InvalidArgument;
@@ -144,10 +142,15 @@ pub unsafe fn start<P: Plugin>(host: *const RawHostApiV1, client: *mut RawClient
         return Status::AbiMismatch;
     }
 
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let context = CallContext::new(Repository::new(&host));
-        P::init(context)
-    }));
+    if state()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .is_some()
+    {
+        return Status::InvalidArgument;
+    }
+
+    let result = catch_unwind(AssertUnwindSafe(|| P::init(Repository::new(&host))));
     let (plugin, subscriptions) = match result {
         Ok(Ok(value)) => value,
         Ok(Err(error)) => {
@@ -176,7 +179,7 @@ pub unsafe fn start<P: Plugin>(host: *const RawHostApiV1, client: *mut RawClient
         *client = RawClientApiV1 {
             abi_version: ABI_VERSION,
             subscriptions: subscriptions.bits(),
-            context: std::ptr::null_mut(),
+            context: null_mut(),
             on_event,
             shutdown,
         };
@@ -240,20 +243,25 @@ fn report(host: &RawHostApiV1, message: &str) {
 mod tests {
     use super::*;
     use crate::{PluginResult, SubscriptionSet};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::{
+        ptr::null,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
 
     static EVENTS: AtomicUsize = AtomicUsize::new(0);
+    static INITS: AtomicUsize = AtomicUsize::new(0);
 
     struct TestPlugin;
     impl Plugin for TestPlugin {
-        fn init(_: CallContext<'_>) -> PluginResult<(Self, SubscriptionSet)> {
-            Ok((Self, SubscriptionSet::ZONE_CHANGED))
+        fn init(_: Repository<'_>) -> PluginResult<(Self, SubscriptionSet)> {
+            INITS.fetch_add(1, Ordering::SeqCst);
+            Ok((Self, SubscriptionSet::PRIMARY_PLAYER_CHANGED))
         }
-        fn on_event(&mut self, _: CallContext<'_>, _: Event<'_>) -> PluginResult<()> {
+        fn on_event(&mut self, _: Repository<'_>, _: Event<'_>) -> PluginResult<()> {
             EVENTS.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
-        fn shutdown(&mut self, _: CallContext<'_>) -> PluginResult<()> {
+        fn shutdown(&mut self, _: Repository<'_>) -> PluginResult<()> {
             Ok(())
         }
     }
@@ -278,14 +286,14 @@ mod tests {
     fn lifecycle_is_panic_safe() {
         let host = RawHostApiV1 {
             abi_version: ABI_VERSION,
-            context: std::ptr::null_mut(),
+            context: null_mut(),
             query: Some(query),
             set_status: Some(status),
         };
         let mut client = RawClientApiV1 {
             abi_version: 0,
             subscriptions: 0,
-            context: std::ptr::null_mut(),
+            context: null_mut(),
             on_event,
             shutdown,
         };
@@ -293,9 +301,14 @@ mod tests {
             unsafe { start::<TestPlugin>(&host, &mut client) },
             Status::Ok
         );
+        assert_eq!(
+            unsafe { start::<TestPlugin>(&host, &mut client) },
+            Status::InvalidArgument
+        );
+        assert_eq!(INITS.load(Ordering::SeqCst), 1);
         let raw = RawEventV1 {
-            kind: 6,
-            payload: std::ptr::null(),
+            kind: 4,
+            payload: null(),
             payload_len: 0,
         };
         assert_eq!(

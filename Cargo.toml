@@ -3,8 +3,11 @@ name = "act-bridge-gen"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
+description = "Generate a .NET ACT shim for Rust FFXIV plugins"
 
 [dependencies]
+bitflags = "2"
 bytes = "1"
-dotnetdll = "0.3"
+dotscope = { version = "0.9", default-features = false }
+sha1 = "0.11"
 thiserror = "2"
