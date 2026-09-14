@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
@@ -10,8 +11,24 @@ using Advanced_Combat_Tracker;
 using FFXIV_ACT_Plugin.Common;
 using FFXIV_ACT_Plugin.Common.Models;
 
+[assembly: AssemblyTitle(ActBridge.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyDescription(ActBridge.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyCompany(ActBridge.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyProduct(ActBridge.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyCopyright(ActBridge.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyTrademark(ActBridge.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyFileVersion("0.0.0.0")]
+[assembly: AssemblyInformationalVersion(ActBridge.Generated.TemplateMetadata.Placeholder)]
+
 namespace ActBridge.Generated
 {
+    internal static class TemplateMetadata
+    {
+        private const string Chunk =
+            "________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________";
+        internal const string Placeholder = Chunk + Chunk + Chunk + Chunk + Chunk + Chunk + Chunk + Chunk;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct HostApi
     {

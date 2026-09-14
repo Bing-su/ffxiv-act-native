@@ -6,7 +6,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use crate::{Event, Plugin, Repository};
+use crate::{Event, Plugin, PluginInit, Repository};
 
 pub const ABI_VERSION: u32 = 1;
 
@@ -151,7 +151,10 @@ pub unsafe fn start<P: Plugin>(host: *const RawHostApiV1, client: *mut RawClient
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| P::init(Repository::new(&host))));
-    let (plugin, subscriptions) = match result {
+    let PluginInit {
+        plugin,
+        subscriptions,
+    } = match result {
         Ok(Ok(value)) => value,
         Ok(Err(error)) => {
             report(&host, &error.to_string());
@@ -253,9 +256,12 @@ mod tests {
 
     struct TestPlugin;
     impl Plugin for TestPlugin {
-        fn init(_: Repository<'_>) -> PluginResult<(Self, SubscriptionSet)> {
+        fn init(_: Repository<'_>) -> PluginResult<PluginInit<Self>> {
             INITS.fetch_add(1, Ordering::SeqCst);
-            Ok((Self, SubscriptionSet::PRIMARY_PLAYER_CHANGED))
+            Ok(PluginInit::new(
+                Self,
+                SubscriptionSet::PRIMARY_PLAYER_CHANGED,
+            ))
         }
         fn on_event(&mut self, _: Repository<'_>, _: Event<'_>) -> PluginResult<()> {
             EVENTS.fetch_add(1, Ordering::SeqCst);

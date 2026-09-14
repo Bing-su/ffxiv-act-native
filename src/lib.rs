@@ -10,15 +10,19 @@ mod abi;
 mod api;
 mod error;
 mod generate;
+mod metadata;
 
 pub use abi::{ABI_VERSION, RawClientApiV1, RawEventV1, RawHostApiV1, Status};
 pub use api::{
-    Combatant, Event, EventKind, NetworkBuff, Player, Plugin, PluginError, PluginResult,
-    Repository, SubscriptionSet,
+    Combatant, Event, EventKind, NetworkBuff, Player, Plugin, PluginError, PluginInit,
+    PluginResult, Repository, SubscriptionSet,
 };
 pub use bytes::Bytes;
 pub use error::{DecodeError, GenerateError};
+#[cfg(feature = "embedded-contracts")]
+pub use generate::build_shim;
 pub use generate::{PluginConfig, generate};
+pub use metadata::PluginMetadata;
 
 /// Export the single entry point expected by a generated managed shim.
 ///

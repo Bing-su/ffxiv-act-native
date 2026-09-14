@@ -11,4 +11,4 @@ crate-type = ["cdylib"]
 act-bridge-gen = { path = "../.." }
 
 [build-dependencies]
-act-bridge-gen = { path = "../.." }
+act-bridge-gen = { path = "../..", features = ["embedded-contracts"] }

@@ -4,12 +4,14 @@ use std::{
     io::{BufWriter, Write},
 };
 
-use act_bridge_gen::{Event, Plugin, PluginResult, Repository, SubscriptionSet, export_plugin};
+use act_bridge_gen::{
+    Event, Plugin, PluginInit, PluginResult, Repository, SubscriptionSet, export_plugin,
+};
 
 struct FfxivPlugin(BufWriter<File>);
 
 impl Plugin for FfxivPlugin {
-    fn init(repository: Repository<'_>) -> PluginResult<(Self, SubscriptionSet)> {
+    fn init(repository: Repository<'_>) -> PluginResult<PluginInit<Self>> {
         let mut log = BufWriter::new(
             OpenOptions::new()
                 .create(true)
@@ -21,7 +23,7 @@ impl Plugin for FfxivPlugin {
             "started; current player={:#010X}",
             repository.current_player_id()?
         )?;
-        Ok((Self(log), SubscriptionSet::ZONE_CHANGED))
+        Ok(PluginInit::new(Self(log), SubscriptionSet::ZONE_CHANGED))
     }
 
     fn on_event(&mut self, _: Repository<'_>, event: Event<'_>) -> PluginResult<()> {

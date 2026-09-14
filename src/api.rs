@@ -9,19 +9,6 @@ use crate::{DecodeError, RawHostApiV1, Status};
 pub type PluginError = Box<dyn Error + Send + Sync + 'static>;
 pub type PluginResult<T> = Result<T, PluginError>;
 
-pub trait Plugin: Send + 'static {
-    /// Creates the plugin and selects the events it wants to receive.
-    fn init(repository: Repository<'_>) -> PluginResult<(Self, SubscriptionSet)>
-    where
-        Self: Sized;
-
-    /// Handles one subscribed ACT event.
-    fn on_event(&mut self, repository: Repository<'_>, event: Event<'_>) -> PluginResult<()>;
-
-    /// Releases resources before the managed shim unloads the plugin.
-    fn shutdown(&mut self, repository: Repository<'_>) -> PluginResult<()>;
-}
-
 bitflags::bitflags! {
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
     pub struct SubscriptionSet: u32 {
@@ -39,6 +26,34 @@ bitflags::bitflags! {
         const PROCESS_CHANGED = 1 << 10;
         const ALL = (1 << 11) - 1;
     }
+}
+
+#[derive(Debug)]
+pub struct PluginInit<P> {
+    pub plugin: P,
+    pub subscriptions: SubscriptionSet,
+}
+
+impl<P> PluginInit<P> {
+    pub fn new(plugin: P, subscriptions: SubscriptionSet) -> Self {
+        Self {
+            plugin,
+            subscriptions,
+        }
+    }
+}
+
+pub trait Plugin: Send + 'static {
+    /// Creates the plugin and selects the events it wants to receive.
+    fn init(repository: Repository<'_>) -> PluginResult<PluginInit<Self>>
+    where
+        Self: Sized;
+
+    /// Handles one subscribed ACT event.
+    fn on_event(&mut self, repository: Repository<'_>, event: Event<'_>) -> PluginResult<()>;
+
+    /// Releases resources before the managed shim unloads the plugin.
+    fn shutdown(&mut self, repository: Repository<'_>) -> PluginResult<()>;
 }
 
 #[repr(u32)]

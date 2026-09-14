@@ -1,5 +1,8 @@
 use std::path::Path;
 
+#[cfg(feature = "embedded-contracts")]
+use std::{env, fs, path::PathBuf};
+
 use dotscope::{
     CilAssembly, CilObject, Error,
     metadata::{
@@ -11,7 +14,7 @@ use dotscope::{
 };
 use sha1::{Digest, Sha1};
 
-use crate::GenerateError;
+use crate::{GenerateError, PluginMetadata, metadata};
 
 const ACT_INPUT: &str = "Advanced Combat Tracker.exe";
 const COMMON_INPUT: &str = "FFXIV_ACT_Plugin.Common.dll";
@@ -50,6 +53,7 @@ const REPOSITORY_METHODS: &[&str] = &[
 pub struct PluginConfig {
     pub assembly_name: String,
     pub native_dll_name: String,
+    pub metadata: PluginMetadata,
 }
 
 /// Generates a managed ACT shim bound to the supplied native plugin DLL.
@@ -63,6 +67,23 @@ pub fn generate(
     let common = parse(ffxiv_common, COMMON_INPUT)?;
     validate_contracts(&act, &common)?;
     emit(&act, &common, config)
+}
+
+/// Generates a managed ACT shim from the embedded API contracts during a Cargo build.
+#[cfg(feature = "embedded-contracts")]
+pub fn build_shim(config: &PluginConfig) -> Result<(), Box<dyn std::error::Error>> {
+    let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is not set")?)
+        .ancestors()
+        .nth(3)
+        .ok_or("OUT_DIR has an unexpected layout")?
+        .join(format!("{}.dll", config.assembly_name));
+    let shim = generate(
+        include_bytes!("../managed/fixtures/Advanced Combat Tracker.exe"),
+        include_bytes!("../managed/fixtures/FFXIV_ACT_Plugin.Common.dll"),
+        config,
+    )?;
+    fs::write(output, shim)?;
+    Ok(())
 }
 
 fn parse(bytes: &[u8], input: &'static str) -> Result<CilObject, GenerateError> {
@@ -90,7 +111,7 @@ fn validate_config(config: &PluginConfig) -> Result<(), GenerateError> {
             "native_dll_name must be a .dll file name without a path",
         ));
     }
-    Ok(())
+    metadata::validate(&config.metadata, &config.assembly_name)
 }
 
 /// Verifies the ACT and SDK members used by the managed shim.
@@ -219,15 +240,23 @@ fn emit(
         .ok_or(GenerateError::MissingAssemblyManifest {
             input: COMMON_INPUT,
         })?;
-    let mut output = CilAssembly::from_bytes(
+    let template = metadata::apply_version_resource(
         include_bytes!("../managed/Shim.template.dll").to_vec(),
-    )
-    .map_err(|error| GenerateError::InvalidAssembly {
-        input: SHIM_TEMPLATE,
-        message: error.to_string(),
-    })?;
+        &config.assembly_name,
+        &config.metadata,
+    )?;
+    let mut output =
+        CilAssembly::from_bytes(template).map_err(|error| GenerateError::InvalidAssembly {
+            input: SHIM_TEMPLATE,
+            message: error.to_string(),
+        })?;
 
-    replace_assembly_name(&mut output, &config.assembly_name)?;
+    replace_assembly_name(
+        &mut output,
+        &config.assembly_name,
+        config.metadata.assembly_version,
+    )?;
+    metadata::apply_assembly_attributes(&mut output, &config.assembly_name, &config.metadata)?;
     replace_assembly_reference(&mut output, "Advanced Combat Tracker", &act_identity)?;
     replace_assembly_reference(&mut output, "FFXIV_ACT_Plugin.Common", &common_identity)?;
     replace_module_reference(&mut output, NATIVE_PLACEHOLDER, &config.native_dll_name)?;
@@ -235,7 +264,11 @@ fn emit(
     output.to_memory().map_err(write_error)
 }
 
-fn replace_assembly_name(output: &mut CilAssembly, name: &str) -> Result<(), GenerateError> {
+fn replace_assembly_name(
+    output: &mut CilAssembly,
+    name: &str,
+    version: [u16; 4],
+) -> Result<(), GenerateError> {
     let assembly_name = output.string_add(name).map_err(write_error)?.placeholder();
     let module_name = output
         .string_add(&format!("{name}.dll"))
@@ -262,10 +295,10 @@ fn replace_assembly_name(output: &mut CilAssembly, name: &str) -> Result<(), Gen
             member_name: "<Module>",
         })?;
     assembly.name = assembly_name;
-    assembly.major_version = 1;
-    assembly.minor_version = 0;
-    assembly.build_number = 0;
-    assembly.revision_number = 0;
+    assembly.major_version = u32::from(version[0]);
+    assembly.minor_version = u32::from(version[1]);
+    assembly.build_number = u32::from(version[2]);
+    assembly.revision_number = u32::from(version[3]);
     module.name = module_name;
     output
         .table_row_update(TableId::Assembly, 1, TableDataOwned::Assembly(assembly))
@@ -410,7 +443,11 @@ mod tests {
         process::{Command, id},
     };
 
-    use dotscope::{ValidationConfig, metadata::tables::TypeDefRaw};
+    use dotscope::{
+        ValidationConfig,
+        metadata::{customattributes::CustomAttributeArgument, tables::TypeDefRaw},
+    };
+    use editpe::Image;
 
     const ACT: &[u8] = include_bytes!("../managed/fixtures/Advanced Combat Tracker.exe");
     const COMMON: &[u8] = include_bytes!("../managed/fixtures/FFXIV_ACT_Plugin.Common.dll");
@@ -421,6 +458,7 @@ mod tests {
             let config = PluginConfig {
                 assembly_name: "Test".into(),
                 native_dll_name: name.into(),
+                metadata: PluginMetadata::default(),
             };
             assert!(validate_config(&config).is_err(), "accepted {name:?}");
         }
@@ -434,12 +472,66 @@ mod tests {
             &PluginConfig {
                 assembly_name: "Example".into(),
                 native_dll_name: "example.dll".into(),
+                metadata: PluginMetadata {
+                    assembly_version: [2, 3, 4, 5],
+                    file_version: [6, 7, 8, 9],
+                    product_version: "10.11.12+test".into(),
+                    file_description: "Example plugin".into(),
+                    product_name: "Example product".into(),
+                    company_name: "Example company".into(),
+                    legal_copyright: "Example copyright".into(),
+                    comments: "Example comments".into(),
+                },
             },
         )
         .unwrap();
+        let image = Image::parse(bytes.clone()).unwrap();
+        let version = image
+            .resource_directory()
+            .unwrap()
+            .get_version_info()
+            .unwrap()
+            .unwrap();
+        let strings = &version.strings[0].strings;
+        assert_eq!(strings["OriginalFilename"], "Example.dll");
+        assert_eq!(strings["FileVersion"], "6.7.8.9");
+        assert_eq!(strings["ProductVersion"], "10.11.12+test");
+        assert_eq!(strings["FileDescription"], "Example plugin");
         let generated =
             CilObject::from_mem_with_validation(bytes, ValidationConfig::disabled()).unwrap();
+        let attribute_strings: Vec<_> = generated
+            .assembly()
+            .unwrap()
+            .custom_attributes
+            .iter()
+            .filter_map(|(_, attribute)| match attribute.fixed_args.first() {
+                Some(CustomAttributeArgument::String(value)) => Some(value.as_str()),
+                _ => None,
+            })
+            .collect();
+        for expected in [
+            "Example",
+            "Example plugin",
+            "Example product",
+            "Example company",
+            "Example copyright",
+            "6.7.8.9",
+            "10.11.12+test",
+        ] {
+            assert!(attribute_strings.contains(&expected));
+        }
+        assert!(!attribute_strings.iter().any(|value| value.contains("___")));
         assert_eq!(generated.assembly().unwrap().name, "Example");
+        let assembly = generated.assembly().unwrap();
+        assert_eq!(
+            [
+                assembly.major_version,
+                assembly.minor_version,
+                assembly.build_number,
+                assembly.revision_number,
+            ],
+            [2, 3, 4, 5]
+        );
         assert_eq!(generated.module().unwrap().name, "Example.dll");
         assert!(
             generated
@@ -563,6 +655,7 @@ mod tests {
             &PluginConfig {
                 assembly_name: "ActBridge.Integration".into(),
                 native_dll_name: "act_bridge_integration.dll".into(),
+                metadata: PluginMetadata::default(),
             },
         )
         .unwrap();

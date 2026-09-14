@@ -15,15 +15,18 @@ act-bridge-gen = "0.1"
 
 ```rust
 use act_bridge_gen::{
-    Event, Plugin, PluginResult, Repository, SubscriptionSet, export_plugin,
+    Event, Plugin, PluginInit, PluginResult, Repository, SubscriptionSet, export_plugin,
 };
 
 struct MyPlugin;
 
 impl Plugin for MyPlugin {
-    fn init(repository: Repository<'_>) -> PluginResult<(Self, SubscriptionSet)> {
+    fn init(repository: Repository<'_>) -> PluginResult<PluginInit<Self>> {
         let _player_id = repository.current_player_id()?;
-        Ok((Self, SubscriptionSet::ZONE_CHANGED | SubscriptionSet::LOG_LINE))
+        Ok(PluginInit::new(
+            Self,
+            SubscriptionSet::ZONE_CHANGED | SubscriptionSet::LOG_LINE,
+        ))
     }
 
     fn on_event(&mut self, _: Repository<'_>, event: Event<'_>) -> PluginResult<()> {
@@ -37,17 +40,45 @@ impl Plugin for MyPlugin {
 export_plugin!(MyPlugin);
 ```
 
-호출자의 생성 프로그램에서 shim을 저장합니다. 별도 CLI나 소비자 `build.rs`
-통합은 없습니다.
+`embedded-contracts` 피처를 build dependency에서 활성화하면 ACT나 SDK 설치 없이
+shim을 함께 빌드할 수 있습니다.
+
+```toml
+[build-dependencies]
+act-bridge-gen = { version = "0.1", features = ["embedded-contracts"] }
+```
 
 ```rust,no_run
-use act_bridge_gen::{PluginConfig, generate};
+use act_bridge_gen::{PluginConfig, PluginMetadata};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    act_bridge_gen::build_shim(&PluginConfig {
+        assembly_name: "MyPlugin.ACT".into(),
+        native_dll_name: "my_plugin.dll".into(),
+        metadata: PluginMetadata {
+            file_version: [0, 1, 0, 0],
+            product_version: "0.1.0".into(),
+            file_description: "My ACT plugin".into(),
+            product_name: "MyPlugin".into(),
+            ..Default::default()
+        },
+    })
+}
+```
+
+`PluginMetadata`는 assembly/file/product 버전과 파일 설명, 제품명, 회사명,
+저작권 및 설명을 설정합니다. `OriginalFilename`은 assembly 이름에서 생성됩니다.
+직접 입력 어셈블리를 지정해야 하는 경우에는 저수준 생성 API를 사용합니다.
+
+```rust,no_run
+use act_bridge_gen::{PluginConfig, PluginMetadata, generate};
 
 let act = std::fs::read(r"C:\Program Files\Advanced Combat Tracker\Advanced Combat Tracker.exe")?;
 let common = std::fs::read(r"sdk\FFXIV_ACT_Plugin.Common.dll")?;
 let shim = generate(&act, &common, &PluginConfig {
     assembly_name: "MyPlugin.ACT".into(),
     native_dll_name: "my_plugin.dll".into(),
+    metadata: PluginMetadata::default(),
 })?;
 std::fs::write("MyPlugin.ACT.dll", shim)?;
 # Ok::<(), Box<dyn std::error::Error>>(())
@@ -70,7 +101,7 @@ SDK의 Common DLL은 빌드 입력일 뿐 결과물 옆에 복사하지 않습�
 
 실행 가능한 최소 예제는 `examples/ffxiv-plugin`에 있습니다. 지역 변경을
 `%TEMP%\ActBridgeExample.log`에 기록하며, build script가 managed shim도 함께
-생성합니다.
+생성합니다. 빌드에는 ACT나 FFXIV ACT Plugin SDK 설치가 필요하지 않습니다.
 
 ```powershell
 cargo build --manifest-path examples\ffxiv-plugin\Cargo.toml
@@ -78,9 +109,7 @@ cargo build --manifest-path examples\ffxiv-plugin\Cargo.toml
 
 `examples\ffxiv-plugin\target\debug`의 `ActBridgeExample.ACT.dll`과
 `ffxiv_plugin.dll`을 같은 플러그인 폴더에 복사한 뒤 ACT에는 managed DLL을
-추가합니다. SDK 경로가 기본값과 다르면 `ACT_BRIDGE_ACT_EXE`와
-`ACT_BRIDGE_COMMON_DLL` 환경 변수를 지정합니다. 릴리스 빌드는 `--release`를
-추가하고 `target\release`를 사용합니다.
+추가합니다. 릴리스 빌드는 `--release`를 추가하고 `target\release`를 사용합니다.
 
 선택적 실제 SDK 테스트:
 
@@ -89,5 +118,3 @@ $env:ACT_BRIDGE_ACT_EXE = 'C:\path\Advanced Combat Tracker.exe'
 $env:ACT_BRIDGE_COMMON_DLL = 'C:\path\FFXIV_ACT_Plugin.Common.dll'
 cargo test optional_real_sdk_generation
 ```
-
-라이선스는 `GPL-3.0-or-later`입니다.
