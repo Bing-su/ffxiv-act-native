@@ -20,7 +20,7 @@ const ACT_INPUT: &str = "Advanced Combat Tracker.exe";
 const COMMON_INPUT: &str = "FFXIV_ACT_Plugin.Common.dll";
 const SUBSCRIPTION_TYPE: &str = "FFXIV_ACT_Plugin.Common.IDataSubscription";
 const SHIM_TEMPLATE: &str = "managed shim template";
-const NATIVE_PLACEHOLDER: &str = "__ACT_BRIDGE_NATIVE__.dll";
+const NATIVE_PLACEHOLDER: &str = "__FFXIV_ACT_NATIVE__.dll";
 const COMMON_EVENTS: &[&str] = &[
     "NetworkReceived",
     "NetworkSent",
@@ -555,7 +555,7 @@ mod tests {
             !generated
                 .refs_module()
                 .iter()
-                .any(|entry| entry.value().name == "__ACT_BRIDGE_NATIVE__.dll")
+                .any(|entry| entry.value().name == "__FFXIV_ACT_NATIVE__.dll")
         );
         let strings = generated.strings().unwrap();
         let plugin_types = generated
@@ -579,13 +579,13 @@ mod tests {
     fn managed_template_matches_source_when_csc_is_available() {
         let csc = PathBuf::from(env::var_os("WINDIR").unwrap_or_default())
             .join(r"Microsoft.NET\Framework\v4.0.30319\csc.exe");
-        let act = env::var_os("ACT_BRIDGE_ACT_EXE")
+        let act = env::var_os("FFXIV_ACT_NATIVE_ACT_EXE")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
                 PathBuf::from(env::var_os("APPDATA").unwrap_or_default())
                     .join(r"Advanced Combat Tracker\Advanced Combat Tracker.exe")
             });
-        let common = env::var_os("ACT_BRIDGE_COMMON_DLL")
+        let common = env::var_os("FFXIV_ACT_NATIVE_COMMON_DLL")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
                 PathBuf::from(r"FFXIV_ACT_Plugin_SDK_3.0.3.0\SDK\FFXIV_ACT_Plugin.Common.dll")
@@ -599,7 +599,7 @@ mod tests {
             return;
         }
 
-        let directory = env::temp_dir().join(format!("act-bridge-template-{}", id()));
+        let directory = env::temp_dir().join(format!("ffxiv-act-native-template-{}", id()));
         std::fs::create_dir_all(&directory).unwrap();
         let output = directory.join("Shim.template.dll");
         let status = Command::new(csc)
@@ -644,8 +644,8 @@ mod tests {
     #[test]
     fn optional_real_sdk_generation() {
         let (Ok(act_path), Ok(common_path)) = (
-            env::var("ACT_BRIDGE_ACT_EXE"),
-            env::var("ACT_BRIDGE_COMMON_DLL"),
+            env::var("FFXIV_ACT_NATIVE_ACT_EXE"),
+            env::var("FFXIV_ACT_NATIVE_COMMON_DLL"),
         ) else {
             return;
         };
@@ -653,23 +653,23 @@ mod tests {
             &read(act_path).unwrap(),
             &read(common_path).unwrap(),
             &PluginConfig {
-                assembly_name: "ActBridge.Integration".into(),
-                native_dll_name: "act_bridge_integration.dll".into(),
+                assembly_name: "FfxivActNative.Integration".into(),
+                native_dll_name: "ffxiv_act_native_integration.dll".into(),
                 metadata: PluginMetadata::default(),
             },
         )
         .unwrap();
         CilObject::from_mem_with_validation(bytes.clone(), ValidationConfig::disabled()).unwrap();
         if cfg!(windows) {
-            let configured = env::var_os("ACT_BRIDGE_OUTPUT_DLL").map(PathBuf::from);
+            let configured = env::var_os("FFXIV_ACT_NATIVE_OUTPUT_DLL").map(PathBuf::from);
             let output = configured
                 .clone()
-                .unwrap_or_else(|| env::temp_dir().join(format!("act-bridge-{}.dll", id())));
+                .unwrap_or_else(|| env::temp_dir().join(format!("ffxiv-act-native-{}.dll", id())));
             write(&output, bytes).unwrap();
             let result = Command::new("powershell.exe").args([
                 "-NoProfile", "-Command",
-                "$act=[Reflection.Assembly]::LoadFile($env:ACT_BRIDGE_ACT_EXE); $common=[Reflection.Assembly]::LoadFile($env:ACT_BRIDGE_COMMON_DLL); $shim=[Reflection.Assembly]::LoadFile($env:ACT_BRIDGE_GENERATED); $plugins=@($shim.GetTypes() | Where-Object { $_.GetInterfaces().FullName -contains 'Advanced_Combat_Tracker.IActPluginV1' }); if($plugins.Count -ne 1){ throw 'expected one ACT plugin type' }",
-            ]).env("ACT_BRIDGE_GENERATED", &output).status().unwrap();
+                "$act=[Reflection.Assembly]::LoadFile($env:FFXIV_ACT_NATIVE_ACT_EXE); $common=[Reflection.Assembly]::LoadFile($env:FFXIV_ACT_NATIVE_COMMON_DLL); $shim=[Reflection.Assembly]::LoadFile($env:FFXIV_ACT_NATIVE_GENERATED); $plugins=@($shim.GetTypes() | Where-Object { $_.GetInterfaces().FullName -contains 'Advanced_Combat_Tracker.IActPluginV1' }); if($plugins.Count -ne 1){ throw 'expected one ACT plugin type' }",
+            ]).env("FFXIV_ACT_NATIVE_GENERATED", &output).status().unwrap();
             if configured.is_none() {
                 remove_file(output).unwrap();
             }

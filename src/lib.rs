@@ -31,7 +31,7 @@ pub use metadata::PluginMetadata;
 macro_rules! export_plugin {
     ($plugin:ty) => {
         #[unsafe(no_mangle)]
-        pub unsafe extern "system" fn act_bridge_entry_v1(
+        pub unsafe extern "system" fn ffxiv_act_native_entry_v1(
             host: *const $crate::RawHostApiV1,
             client: *mut $crate::RawClientApiV1,
         ) -> $crate::Status {

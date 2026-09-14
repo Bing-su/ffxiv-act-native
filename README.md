@@ -1,4 +1,4 @@
-# act-bridge-gen
+# ffxiv-act-native
 
 Rust `cdylib`으로 FFXIV ACT 플러그인을 작성할 수 있도록 AnyCPU .NET Framework
 shim을 생성합니다. 생성기는 `Advanced Combat Tracker.exe`와 공식 SDK의
@@ -10,11 +10,11 @@ shim을 생성합니다. 생성기는 `Advanced Combat Tracker.exe`와 공식 SD
 crate-type = ["cdylib"]
 
 [dependencies]
-act-bridge-gen = "0.1"
+ffxiv-act-native = "0.1"
 ```
 
 ```rust
-use act_bridge_gen::{
+use ffxiv_act_native::{
     Event, Plugin, PluginInit, PluginResult, Repository, SubscriptionSet, export_plugin,
 };
 
@@ -45,14 +45,14 @@ shim을 함께 빌드할 수 있습니다.
 
 ```toml
 [build-dependencies]
-act-bridge-gen = { version = "0.1", features = ["embedded-contracts"] }
+ffxiv-act-native = { version = "0.1", features = ["embedded-contracts"] }
 ```
 
 ```rust,no_run
-use act_bridge_gen::{PluginConfig, PluginMetadata};
+use ffxiv_act_native::{PluginConfig, PluginMetadata};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    act_bridge_gen::build_shim(&PluginConfig {
+    ffxiv_act_native::build_shim(&PluginConfig {
         assembly_name: "MyPlugin.ACT".into(),
         native_dll_name: "my_plugin.dll".into(),
         metadata: PluginMetadata {
@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 직접 입력 어셈블리를 지정해야 하는 경우에는 저수준 생성 API를 사용합니다.
 
 ```rust,no_run
-use act_bridge_gen::{PluginConfig, PluginMetadata, generate};
+use ffxiv_act_native::{PluginConfig, PluginMetadata, generate};
 
 let act = std::fs::read(r"C:\Program Files\Advanced Combat Tracker\Advanced Combat Tracker.exe")?;
 let common = std::fs::read(r"sdk\FFXIV_ACT_Plugin.Common.dll")?;
@@ -100,21 +100,21 @@ SDK의 Common DLL은 빌드 입력일 뿐 결과물 옆에 복사하지 않습�
 실행 중인 ACT 프로세스와 같아야 합니다.
 
 실행 가능한 최소 예제는 `examples/ffxiv-plugin`에 있습니다. 지역 변경을
-`%TEMP%\ActBridgeExample.log`에 기록하며, build script가 managed shim도 함께
+`%TEMP%\FfxivActNativeExample.log`에 기록하며, build script가 managed shim도 함께
 생성합니다. 빌드에는 ACT나 FFXIV ACT Plugin SDK 설치가 필요하지 않습니다.
 
 ```powershell
 cargo build --manifest-path examples\ffxiv-plugin\Cargo.toml
 ```
 
-`examples\ffxiv-plugin\target\debug`의 `ActBridgeExample.ACT.dll`과
+`examples\ffxiv-plugin\target\debug`의 `FfxivActNativeExample.ACT.dll`과
 `ffxiv_plugin.dll`을 같은 플러그인 폴더에 복사한 뒤 ACT에는 managed DLL을
 추가합니다. 릴리스 빌드는 `--release`를 추가하고 `target\release`를 사용합니다.
 
 선택적 실제 SDK 테스트:
 
 ```powershell
-$env:ACT_BRIDGE_ACT_EXE = 'C:\path\Advanced Combat Tracker.exe'
-$env:ACT_BRIDGE_COMMON_DLL = 'C:\path\FFXIV_ACT_Plugin.Common.dll'
+$env:FFXIV_ACT_NATIVE_ACT_EXE = 'C:\path\Advanced Combat Tracker.exe'
+$env:FFXIV_ACT_NATIVE_COMMON_DLL = 'C:\path\FFXIV_ACT_Plugin.Common.dll'
 cargo test optional_real_sdk_generation
 ```

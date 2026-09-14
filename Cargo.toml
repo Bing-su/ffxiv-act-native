@@ -1,5 +1,5 @@
 [package]
-name = "act-bridge-gen"
+name = "ffxiv-act-native"
 version = "0.1.0"
 edition = "2024"
 description = "Generate a .NET ACT shim for Rust FFXIV plugins"

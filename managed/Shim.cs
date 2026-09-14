@@ -11,16 +11,16 @@ using Advanced_Combat_Tracker;
 using FFXIV_ACT_Plugin.Common;
 using FFXIV_ACT_Plugin.Common.Models;
 
-[assembly: AssemblyTitle(ActBridge.Generated.TemplateMetadata.Placeholder)]
-[assembly: AssemblyDescription(ActBridge.Generated.TemplateMetadata.Placeholder)]
-[assembly: AssemblyCompany(ActBridge.Generated.TemplateMetadata.Placeholder)]
-[assembly: AssemblyProduct(ActBridge.Generated.TemplateMetadata.Placeholder)]
-[assembly: AssemblyCopyright(ActBridge.Generated.TemplateMetadata.Placeholder)]
-[assembly: AssemblyTrademark(ActBridge.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyTitle(FfxivActNative.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyDescription(FfxivActNative.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyCompany(FfxivActNative.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyProduct(FfxivActNative.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyCopyright(FfxivActNative.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyTrademark(FfxivActNative.Generated.TemplateMetadata.Placeholder)]
 [assembly: AssemblyFileVersion("0.0.0.0")]
-[assembly: AssemblyInformationalVersion(ActBridge.Generated.TemplateMetadata.Placeholder)]
+[assembly: AssemblyInformationalVersion(FfxivActNative.Generated.TemplateMetadata.Placeholder)]
 
-namespace ActBridge.Generated
+namespace FfxivActNative.Generated
 {
     internal static class TemplateMetadata
     {
@@ -154,7 +154,7 @@ namespace ActBridge.Generated
             catch (Exception ex)
             {
                 required = UIntPtr.Zero;
-                Plugin.SetStatus("Rust bridge repository error: " + ex.Message);
+                Plugin.SetStatus("FFXIV ACT native repository error: " + ex.Message);
                 return 4;
             }
         }
@@ -258,7 +258,7 @@ namespace ActBridge.Generated
                         if (stopping || client.Event == null)
                             return;
                         if (client.Event(client.Context, ref value) != 0)
-                            Plugin.SetStatus("Rust bridge: event callback failed");
+                            Plugin.SetStatus("FFXIV ACT native: event callback failed");
                     }
                 }
                 finally
@@ -269,7 +269,7 @@ namespace ActBridge.Generated
             }
             catch (Exception ex)
             {
-                Plugin.SetStatus("Rust bridge event error: " + ex.Message);
+                Plugin.SetStatus("FFXIV ACT native event error: " + ex.Message);
             }
         }
 
@@ -462,8 +462,8 @@ namespace ActBridge.Generated
         [DllImport("kernel32.dll")]
         private static extern bool FreeLibrary(IntPtr module);
 
-        [DllImport("__ACT_BRIDGE_NATIVE__.dll", CallingConvention = CallingConvention.Winapi)]
-        private static extern int act_bridge_entry_v1(ref HostApi host, out ClientApi client);
+        [DllImport("__FFXIV_ACT_NATIVE__.dll", CallingConvention = CallingConvention.Winapi)]
+        private static extern int ffxiv_act_native_entry_v1(ref HostApi host, out ClientApi client);
 
         public void InitPlugin(TabPage pluginScreenSpace, Label pluginStatusText)
         {
@@ -473,12 +473,12 @@ namespace ActBridge.Generated
                 object subscriptions, repository;
                 if (!FindServices(out subscriptions, out repository))
                 {
-                    SetStatus("Rust bridge: enable FFXIV_ACT_Plugin first");
+                    SetStatus("FFXIV ACT native: enable FFXIV_ACT_Plugin first");
                     return;
                 }
 
                 CommonBridge.Bind(subscriptions, repository);
-                string path = Path.Combine(GetPluginDirectory(), "__ACT_BRIDGE_NATIVE__.dll");
+                string path = Path.Combine(GetPluginDirectory(), "__FFXIV_ACT_NATIVE__.dll");
                 nativeHandle = LoadLibrary(path);
                 if (nativeHandle == IntPtr.Zero)
                     throw new InvalidOperationException("native DLL load failed");
@@ -486,20 +486,20 @@ namespace ActBridge.Generated
                 query = CommonBridge.Query;
                 status = SetStatusNative;
                 HostApi host = new HostApi { Version = 1, Query = query, Status = status };
-                int result = act_bridge_entry_v1(ref host, out client);
+                int result = ffxiv_act_native_entry_v1(ref host, out client);
                 if (result != 0)
                     throw new InvalidOperationException("native init status " + result);
                 if (client.Version != 1 || client.Event == null || client.Shutdown == null)
                     throw new InvalidOperationException("invalid native ABI");
 
                 CommonBridge.Subscribe(client);
-                SetStatus("Rust bridge loaded");
+                SetStatus("FFXIV ACT native loaded");
             }
             catch (Exception ex)
             {
                 CommonBridge.Stop();
                 Unload();
-                SetStatus("Rust bridge: " + ex.Message);
+                SetStatus("FFXIV ACT native: " + ex.Message);
             }
         }
 
@@ -513,7 +513,7 @@ namespace ActBridge.Generated
             }
             catch (Exception ex)
             {
-                SetStatus("Rust bridge shutdown error: " + ex.Message);
+                SetStatus("FFXIV ACT native shutdown error: " + ex.Message);
             }
             finally
             {

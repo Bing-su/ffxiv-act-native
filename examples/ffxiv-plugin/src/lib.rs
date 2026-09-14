@@ -4,7 +4,7 @@ use std::{
     io::{BufWriter, Write},
 };
 
-use act_bridge_gen::{
+use ffxiv_act_native::{
     Event, Plugin, PluginInit, PluginResult, Repository, SubscriptionSet, export_plugin,
 };
 
@@ -16,7 +16,7 @@ impl Plugin for FfxivPlugin {
             OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(env::temp_dir().join("ActBridgeExample.log"))?,
+                .open(env::temp_dir().join("FfxivActNativeExample.log"))?,
         );
         writeln!(
             log,

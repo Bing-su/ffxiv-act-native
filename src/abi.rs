@@ -161,7 +161,7 @@ pub unsafe fn start<P: Plugin>(host: *const RawHostApiV1, client: *mut RawClient
             return Status::PluginError;
         }
         Err(_) => {
-            report(&host, "Rust bridge: plugin panicked during init");
+            report(&host, "FFXIV ACT native: plugin panicked during init");
             return Status::Panic;
         }
     };
@@ -214,7 +214,7 @@ unsafe extern "system" fn on_event(_: *mut c_void, raw: *const RawEventV1) -> St
         if panicked {
             report(
                 &state.host,
-                "Rust bridge: plugin panicked during event callback",
+                "FFXIV ACT native: plugin panicked during event callback",
             );
         }
     }
