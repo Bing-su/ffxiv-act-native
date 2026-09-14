@@ -75,6 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ffxiv_act_native::build_shim(&PluginConfig {
         assembly_name: "MyPlugin.ACT".into(),
         native_dll_name: "my_plugin.dll".into(),
+        tab_name: "My Plugin".into(),
         metadata: PluginMetadata {
             file_version: [0, 1, 0, 0],
             product_version: "0.1.0".into(),
@@ -86,7 +87,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`PluginMetadata`는 assembly/file/product 버전과 파일 설명, 제품명, 회사명,
+`tab_name`은 ACT에 표시되는 플러그인 탭 이름입니다. `PluginMetadata`는
+assembly/file/product 버전과 파일 설명, 제품명, 회사명,
 저작권 및 설명을 설정합니다. `OriginalFilename`은 assembly 이름에서 생성됩니다.
 직접 입력 어셈블리를 지정해야 하는 경우에는 저수준 생성 API를 사용합니다.
 
@@ -98,6 +100,7 @@ let common = std::fs::read(r"sdk\FFXIV_ACT_Plugin.Common.dll")?;
 let shim = generate(&act, &common, &PluginConfig {
     assembly_name: "MyPlugin.ACT".into(),
     native_dll_name: "my_plugin.dll".into(),
+    tab_name: "My Plugin".into(),
     metadata: PluginMetadata::default(),
 })?;
 std::fs::write("MyPlugin.ACT.dll", shim)?;

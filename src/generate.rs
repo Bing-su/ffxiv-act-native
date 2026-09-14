@@ -21,6 +21,7 @@ const COMMON_INPUT: &str = "FFXIV_ACT_Plugin.Common.dll";
 const SUBSCRIPTION_TYPE: &str = "FFXIV_ACT_Plugin.Common.IDataSubscription";
 const SHIM_TEMPLATE: &str = "managed shim template";
 const NATIVE_PLACEHOLDER: &str = "__FFXIV_ACT_NATIVE__.dll";
+const TAB_NAME_PLACEHOLDER: &str = "__FFXIV_ACT_TAB_NAME__";
 const COMMON_EVENTS: &[&str] = &[
     "NetworkReceived",
     "NetworkSent",
@@ -53,6 +54,7 @@ const REPOSITORY_METHODS: &[&str] = &[
 pub struct PluginConfig {
     pub assembly_name: String,
     pub native_dll_name: String,
+    pub tab_name: String,
     pub metadata: PluginMetadata,
 }
 
@@ -99,6 +101,9 @@ fn validate_config(config: &PluginConfig) -> Result<(), GenerateError> {
         return Err(GenerateError::InvalidConfig(
             "assembly_name must be a non-empty simple name",
         ));
+    }
+    if config.tab_name.is_empty() {
+        return Err(GenerateError::InvalidConfig("tab_name must not be empty"));
     }
     let native = Path::new(&config.native_dll_name);
     if native.file_name().and_then(|value| value.to_str()) != Some(config.native_dll_name.as_str())
@@ -261,6 +266,7 @@ fn emit(
     replace_assembly_reference(&mut output, "FFXIV_ACT_Plugin.Common", &common_identity)?;
     replace_module_reference(&mut output, NATIVE_PLACEHOLDER, &config.native_dll_name)?;
     replace_user_string(&mut output, NATIVE_PLACEHOLDER, &config.native_dll_name)?;
+    replace_user_string(&mut output, TAB_NAME_PLACEHOLDER, &config.tab_name)?;
     output.to_memory().map_err(write_error)
 }
 
@@ -458,10 +464,19 @@ mod tests {
             let config = PluginConfig {
                 assembly_name: "Test".into(),
                 native_dll_name: name.into(),
+                tab_name: "Test".into(),
                 metadata: PluginMetadata::default(),
             };
             assert!(validate_config(&config).is_err(), "accepted {name:?}");
         }
+
+        let config = PluginConfig {
+            assembly_name: "Test".into(),
+            native_dll_name: "native.dll".into(),
+            tab_name: String::new(),
+            metadata: PluginMetadata::default(),
+        };
+        assert!(validate_config(&config).is_err(), "accepted empty tab name");
     }
 
     #[test]
@@ -472,6 +487,7 @@ mod tests {
             &PluginConfig {
                 assembly_name: "Example".into(),
                 native_dll_name: "example.dll".into(),
+                tab_name: "Example Tab".into(),
                 metadata: PluginMetadata {
                     assembly_version: [2, 3, 4, 5],
                     file_version: [6, 7, 8, 9],
@@ -499,6 +515,17 @@ mod tests {
         assert_eq!(strings["FileDescription"], "Example plugin");
         let generated =
             CilObject::from_mem_with_validation(bytes, ValidationConfig::disabled()).unwrap();
+        let user_strings = generated.userstrings().unwrap();
+        assert!(
+            user_strings
+                .iter()
+                .any(|(_, value)| value.to_string_lossy() == "Example Tab")
+        );
+        assert!(
+            !user_strings
+                .iter()
+                .any(|(_, value)| value.to_string_lossy() == TAB_NAME_PLACEHOLDER)
+        );
         let attribute_strings: Vec<_> = generated
             .assembly()
             .unwrap()
@@ -661,6 +688,7 @@ mod tests {
             &PluginConfig {
                 assembly_name: "FfxivActNative.Integration".into(),
                 native_dll_name: "ffxiv_act_native_integration.dll".into(),
+                tab_name: "Integration".into(),
                 metadata: PluginMetadata::default(),
             },
         )

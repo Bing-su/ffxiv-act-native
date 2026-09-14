@@ -2,6 +2,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ffxiv_act_native::build_shim(&ffxiv_act_native::PluginConfig {
         assembly_name: "FfxivActNativeExample.ACT".into(),
         native_dll_name: "ffxiv_plugin.dll".into(),
+        tab_name: "FFXIV Native Example".into(),
         metadata: ffxiv_act_native::PluginMetadata {
             file_description: "Example Rust plugin for Advanced Combat Tracker".into(),
             product_name: "ffxiv-act-native example".into(),

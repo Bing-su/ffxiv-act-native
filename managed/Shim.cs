@@ -486,6 +486,7 @@ namespace FfxivActNative.Generated
             statusLabel = pluginStatusText;
             try
             {
+                pluginScreenSpace.Text = "__FFXIV_ACT_TAB_NAME__";
                 UiBridge.Bind(pluginScreenSpace);
                 object subscriptions, repository;
                 if (!FindServices(out subscriptions, out repository))
