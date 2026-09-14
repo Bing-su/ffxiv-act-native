@@ -2,14 +2,11 @@
 name = "ffxiv-act-native"
 version = "0.1.0"
 edition = "2024"
-description = "Generate a .NET ACT shim for Rust FFXIV plugins"
+description = "FFXIV ACT native plugin in Rust"
 license = "BlueOak-1.0.0"
 
 [workspace]
 members = ["examples/*"]
-
-[features]
-embedded-contracts = []
 
 [dependencies]
 bitflags = "2"
@@ -18,3 +15,10 @@ dotscope = { version = "0.9", default-features = false }
 editpe = { version = "0.2", default-features = false }
 sha1 = "0.11"
 thiserror = "2"
+
+[features]
+embedded-contracts = []
+
+[profile.release]
+strip = true
+lto = true
