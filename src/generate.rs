@@ -595,6 +595,11 @@ mod tests {
             .display()
             .to_string()
             .replace('/', r"\");
+        let ui_source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("managed/UiBridge.cs")
+            .display()
+            .to_string()
+            .replace('/', r"\");
         if !csc.exists() || !act.exists() || !common.exists() {
             return;
         }
@@ -609,9 +614,10 @@ mod tests {
             .arg(format!("/reference:{}", common.display()))
             .arg("/reference:System.Windows.Forms.dll")
             .arg(source)
+            .arg(ui_source)
             .status()
             .unwrap();
-        assert!(status.success(), "failed to compile managed/Shim.cs");
+        assert!(status.success(), "failed to compile managed shim");
 
         fn normalize_compiler_ids(image: &mut [u8]) {
             let pe = u32::from_le_bytes(image[0x3c..0x40].try_into().unwrap()) as usize;

@@ -15,7 +15,7 @@ mod metadata;
 pub use abi::{ABI_VERSION, RawClientApiV1, RawEventV1, RawHostApiV1, Status};
 pub use api::{
     Combatant, Event, EventKind, NetworkBuff, Player, Plugin, PluginError, PluginInit,
-    PluginResult, Repository, SubscriptionSet,
+    PluginResult, Repository, SubscriptionSet, UiCommand, UiControl, UiEvent,
 };
 pub use bytes::Bytes;
 pub use error::{DecodeError, GenerateError};

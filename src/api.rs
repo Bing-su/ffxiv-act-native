@@ -2,9 +2,12 @@ use std::{
     collections::BTreeMap, error::Error, marker::PhantomData, ptr::null_mut, rc::Rc, str::from_utf8,
 };
 
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 
 use crate::{DecodeError, RawHostApiV1, Status};
+
+const UI_QUERY: u32 = 0x100;
+const MAX_UI_PAYLOAD: usize = 1024 * 1024;
 
 pub type PluginError = Box<dyn Error + Send + Sync + 'static>;
 pub type PluginResult<T> = Result<T, PluginError>;
@@ -70,6 +73,7 @@ pub enum EventKind {
     LogLine = 8,
     ParsedLogLine = 9,
     ProcessChanged = 10,
+    Ui = 11,
 }
 
 impl TryFrom<u32> for EventKind {
@@ -89,6 +93,7 @@ impl TryFrom<u32> for EventKind {
             8 => Ok(Self::LogLine),
             9 => Ok(Self::ParsedLogLine),
             10 => Ok(Self::ProcessChanged),
+            11 => Ok(Self::Ui),
             _ => Err(DecodeError),
         }
     }
@@ -130,6 +135,101 @@ pub enum Event<'a> {
     },
     ProcessChanged {
         process_id: u32,
+    },
+    Ui(UiEvent<'a>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UiEvent<'a> {
+    Clicked { id: u32 },
+    CheckedChanged { id: u32, checked: bool },
+    TextChanged { id: u32, text: &'a str },
+    SelectionChanged { id: u32, selected: Option<u32> },
+    NumberChanged { id: u32, value: i64 },
+    Error { id: Option<u32>, message: &'a str },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UiControl {
+    Row {
+        id: u32,
+    },
+    Label {
+        id: u32,
+        text: String,
+    },
+    Button {
+        id: u32,
+        text: String,
+    },
+    CheckBox {
+        id: u32,
+        text: String,
+        checked: bool,
+    },
+    TextBox {
+        id: u32,
+        text: String,
+    },
+    ComboBox {
+        id: u32,
+        items: Vec<String>,
+        selected: Option<u32>,
+    },
+    Number {
+        id: u32,
+        min: i64,
+        max: i64,
+        step: i64,
+        value: i64,
+    },
+    LogList {
+        id: u32,
+        max_rows: u32,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum UiCommand {
+    Add {
+        parent: Option<u32>,
+        control: UiControl,
+    },
+    Remove {
+        id: u32,
+    },
+    Clear,
+    SetText {
+        id: u32,
+        text: String,
+    },
+    SetEnabled {
+        id: u32,
+        enabled: bool,
+    },
+    SetChecked {
+        id: u32,
+        checked: bool,
+    },
+    SetItems {
+        id: u32,
+        items: Vec<String>,
+        selected: Option<u32>,
+    },
+    SetSelected {
+        id: u32,
+        selected: Option<u32>,
+    },
+    SetNumber {
+        id: u32,
+        value: i64,
+    },
+    AppendLog {
+        id: u32,
+        line: String,
+    },
+    ClearLog {
+        id: u32,
     },
 }
 
@@ -176,7 +276,146 @@ impl<'a> Event<'a> {
             EventKind::ProcessChanged => Self::ProcessChanged {
                 process_id: cursor.u32()?,
             },
+            EventKind::Ui => Self::Ui(cursor.ui_event()?),
         })
+    }
+}
+
+impl UiCommand {
+    fn encode(&self) -> Result<Bytes, RepositoryError> {
+        let mut bytes = BytesMut::new();
+        match self {
+            Self::Add { parent, control } => {
+                bytes.put_u8(0);
+                put_option_u32(&mut bytes, *parent);
+                control.encode(&mut bytes)?;
+            }
+            Self::Remove { id } => {
+                bytes.put_u8(1);
+                bytes.put_u32_le(*id);
+            }
+            Self::Clear => bytes.put_u8(2),
+            Self::SetText { id, text } => {
+                bytes.put_u8(3);
+                bytes.put_u32_le(*id);
+                put_string(&mut bytes, text)?;
+            }
+            Self::SetEnabled { id, enabled } => {
+                bytes.put_u8(4);
+                bytes.put_u32_le(*id);
+                bytes.put_u8(*enabled as u8);
+            }
+            Self::SetChecked { id, checked } => {
+                bytes.put_u8(5);
+                bytes.put_u32_le(*id);
+                bytes.put_u8(*checked as u8);
+            }
+            Self::SetItems {
+                id,
+                items,
+                selected,
+            } => {
+                bytes.put_u8(6);
+                bytes.put_u32_le(*id);
+                put_strings(&mut bytes, items)?;
+                put_option_u32(&mut bytes, *selected);
+            }
+            Self::SetSelected { id, selected } => {
+                bytes.put_u8(7);
+                bytes.put_u32_le(*id);
+                put_option_u32(&mut bytes, *selected);
+            }
+            Self::SetNumber { id, value } => {
+                bytes.put_u8(8);
+                bytes.put_u32_le(*id);
+                bytes.put_i64_le(*value);
+            }
+            Self::AppendLog { id, line } => {
+                bytes.put_u8(9);
+                bytes.put_u32_le(*id);
+                put_string(&mut bytes, line)?;
+            }
+            Self::ClearLog { id } => {
+                bytes.put_u8(10);
+                bytes.put_u32_le(*id);
+            }
+        }
+        if bytes.len() > MAX_UI_PAYLOAD {
+            return Err(RepositoryError::InvalidUi("UI command exceeds 1 MiB"));
+        }
+        Ok(bytes.freeze())
+    }
+}
+
+impl UiControl {
+    fn encode(&self, bytes: &mut BytesMut) -> Result<(), RepositoryError> {
+        let (kind, id) = match self {
+            Self::Row { id } => (0, *id),
+            Self::Label { id, .. } => (1, *id),
+            Self::Button { id, .. } => (2, *id),
+            Self::CheckBox { id, .. } => (3, *id),
+            Self::TextBox { id, .. } => (4, *id),
+            Self::ComboBox { id, .. } => (5, *id),
+            Self::Number { id, .. } => (6, *id),
+            Self::LogList { id, .. } => (7, *id),
+        };
+        bytes.put_u8(kind);
+        bytes.put_u32_le(id);
+        match self {
+            Self::Row { .. } => {}
+            Self::Label { text, .. } | Self::Button { text, .. } | Self::TextBox { text, .. } => {
+                put_string(bytes, text)?;
+            }
+            Self::CheckBox { text, checked, .. } => {
+                put_string(bytes, text)?;
+                bytes.put_u8(*checked as u8);
+            }
+            Self::ComboBox {
+                items, selected, ..
+            } => {
+                put_strings(bytes, items)?;
+                put_option_u32(bytes, *selected);
+            }
+            Self::Number {
+                min,
+                max,
+                step,
+                value,
+                ..
+            } => {
+                bytes.put_i64_le(*min);
+                bytes.put_i64_le(*max);
+                bytes.put_i64_le(*step);
+                bytes.put_i64_le(*value);
+            }
+            Self::LogList { max_rows, .. } => bytes.put_u32_le(*max_rows),
+        }
+        Ok(())
+    }
+}
+
+fn put_string(bytes: &mut BytesMut, value: &str) -> Result<(), RepositoryError> {
+    let len =
+        u32::try_from(value.len()).map_err(|_| RepositoryError::InvalidUi("string is too long"))?;
+    bytes.put_u32_le(len);
+    bytes.extend_from_slice(value.as_bytes());
+    Ok(())
+}
+
+fn put_strings(bytes: &mut BytesMut, values: &[String]) -> Result<(), RepositoryError> {
+    let len =
+        u32::try_from(values.len()).map_err(|_| RepositoryError::InvalidUi("too many items"))?;
+    bytes.put_u32_le(len);
+    for value in values {
+        put_string(bytes, value)?;
+    }
+    Ok(())
+}
+
+fn put_option_u32(bytes: &mut BytesMut, value: Option<u32>) {
+    bytes.put_u8(value.is_some() as u8);
+    if let Some(value) = value {
+        bytes.put_u32_le(value);
     }
 }
 
@@ -298,6 +537,47 @@ impl<'a> Cursor<'a> {
     fn string(&mut self) -> Result<String, DecodeError> {
         Ok(self.str()?.to_owned())
     }
+    fn option_u32(&mut self) -> Result<Option<u32>, DecodeError> {
+        match self.u8()? {
+            0 => Ok(None),
+            1 => Ok(Some(self.u32()?)),
+            _ => Err(DecodeError),
+        }
+    }
+    fn ui_event(&mut self) -> Result<UiEvent<'a>, DecodeError> {
+        let event = match self.u8()? {
+            0 => UiEvent::Clicked { id: self.u32()? },
+            1 => UiEvent::CheckedChanged {
+                id: self.u32()?,
+                checked: match self.u8()? {
+                    0 => false,
+                    1 => true,
+                    _ => return Err(DecodeError),
+                },
+            },
+            2 => UiEvent::TextChanged {
+                id: self.u32()?,
+                text: self.str()?,
+            },
+            3 => UiEvent::SelectionChanged {
+                id: self.u32()?,
+                selected: self.option_u32()?,
+            },
+            4 => UiEvent::NumberChanged {
+                id: self.u32()?,
+                value: self.i64()?,
+            },
+            5 => UiEvent::Error {
+                id: self.option_u32()?,
+                message: self.str()?,
+            },
+            _ => return Err(DecodeError),
+        };
+        if !self.0.is_empty() {
+            return Err(DecodeError);
+        }
+        Ok(event)
+    }
     /// Decodes the shared wire shape of sent and received network events.
     fn network_event(&mut self, kind: EventKind) -> Result<Event<'a>, DecodeError> {
         let timestamp = self.i64()?;
@@ -415,10 +695,12 @@ pub struct Repository<'a> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RepositoryError {
-    #[error("managed repository query failed with status {0:?}")]
+    #[error("managed query failed with status {0:?}")]
     Status(Status),
     #[error("managed repository returned malformed data")]
     Malformed,
+    #[error("invalid UI command: {0}")]
+    InvalidUi(&'static str),
 }
 
 impl<'a> Repository<'a> {
@@ -450,6 +732,9 @@ impl<'a> Repository<'a> {
         if status != Status::Ok && status != Status::BufferTooSmall {
             return Err(RepositoryError::Status(status));
         }
+        if status == Status::Ok && required == 0 {
+            return Ok(Bytes::new());
+        }
         for _ in 0..3 {
             let mut output = BytesMut::zeroed(required);
             let mut next = required;
@@ -477,6 +762,11 @@ impl<'a> Repository<'a> {
             required = next;
         }
         Err(RepositoryError::Status(Status::BufferTooSmall))
+    }
+
+    /// Queues one update for the ACT plugin tab.
+    pub fn ui(&self, command: UiCommand) -> Result<(), RepositoryError> {
+        self.query(UI_QUERY, &command.encode()?).map(|_| ())
     }
 
     /// Returns the current player actor ID.
@@ -595,6 +885,7 @@ impl<'a> Repository<'a> {
 mod tests {
     use super::*;
     use bytes::BufMut;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::{ffi::c_void, ptr::copy_nonoverlapping};
 
     use crate::ABI_VERSION;
@@ -636,6 +927,134 @@ mod tests {
         assert_eq!(player.local_content_id, 99);
     }
 
+    #[test]
+    fn encodes_ui_commands_and_decodes_ui_events() {
+        let command = UiCommand::Add {
+            parent: Some(7),
+            control: UiControl::CheckBox {
+                id: 8,
+                text: "Enabled".into(),
+                checked: true,
+            },
+        };
+        assert_eq!(
+            command.encode().unwrap(),
+            &[
+                0, 1, 7, 0, 0, 0, 3, 8, 0, 0, 0, 7, 0, 0, 0, b'E', b'n', b'a', b'b', b'l', b'e',
+                b'd', 1,
+            ][..]
+        );
+
+        let mut payload = BytesMut::new();
+        payload.put_u8(2);
+        payload.put_u32_le(8);
+        payload.put_u32_le(2);
+        payload.extend_from_slice(b"ok");
+        assert!(matches!(
+            Event::decode(11, &payload),
+            Ok(Event::Ui(UiEvent::TextChanged { id: 8, text: "ok" }))
+        ));
+        payload.put_u8(0);
+        assert!(Event::decode(11, &payload).is_err());
+        assert!(Event::decode(11, &[99]).is_err());
+        assert!(Event::decode(11, &[2, 1, 0]).is_err());
+        assert!(Event::decode(11, &[1, 1, 0, 0, 0, 2]).is_err());
+    }
+
+    #[test]
+    fn encodes_every_ui_command_and_control() {
+        let controls = [
+            UiControl::Row { id: 1 },
+            UiControl::Label {
+                id: 2,
+                text: "label".into(),
+            },
+            UiControl::Button {
+                id: 3,
+                text: "button".into(),
+            },
+            UiControl::CheckBox {
+                id: 4,
+                text: "check".into(),
+                checked: true,
+            },
+            UiControl::TextBox {
+                id: 5,
+                text: "text".into(),
+            },
+            UiControl::ComboBox {
+                id: 6,
+                items: vec!["item".into()],
+                selected: Some(0),
+            },
+            UiControl::Number {
+                id: 7,
+                min: -1,
+                max: 10,
+                step: 1,
+                value: 2,
+            },
+            UiControl::LogList {
+                id: 8,
+                max_rows: 1000,
+            },
+        ];
+        for (kind, control) in controls.into_iter().enumerate() {
+            let bytes = UiCommand::Add {
+                parent: None,
+                control,
+            }
+            .encode()
+            .unwrap();
+            assert_eq!(bytes[0], 0);
+            assert_eq!(bytes[2], kind as u8);
+        }
+
+        let commands = [
+            UiCommand::Remove { id: 1 },
+            UiCommand::Clear,
+            UiCommand::SetText {
+                id: 1,
+                text: "x".into(),
+            },
+            UiCommand::SetEnabled {
+                id: 1,
+                enabled: true,
+            },
+            UiCommand::SetChecked {
+                id: 1,
+                checked: false,
+            },
+            UiCommand::SetItems {
+                id: 1,
+                items: vec!["x".into()],
+                selected: None,
+            },
+            UiCommand::SetSelected {
+                id: 1,
+                selected: Some(0),
+            },
+            UiCommand::SetNumber { id: 1, value: 2 },
+            UiCommand::AppendLog {
+                id: 1,
+                line: "x".into(),
+            },
+            UiCommand::ClearLog { id: 1 },
+        ];
+        for (kind, command) in commands.into_iter().enumerate() {
+            assert_eq!(command.encode().unwrap()[0], kind as u8 + 1);
+        }
+
+        assert!(matches!(
+            UiCommand::SetText {
+                id: 1,
+                text: "x".repeat(MAX_UI_PAYLOAD)
+            }
+            .encode(),
+            Err(RepositoryError::InvalidUi(_))
+        ));
+    }
+
     unsafe extern "system" fn query_with_retry(
         _: *mut c_void,
         _: u32,
@@ -654,6 +1073,21 @@ mod tests {
         Status::Ok
     }
 
+    static EMPTY_CALLS: AtomicUsize = AtomicUsize::new(0);
+    unsafe extern "system" fn empty_query(
+        _: *mut c_void,
+        _: u32,
+        _: *const u8,
+        _: usize,
+        _: *mut u8,
+        _: usize,
+        required: *mut usize,
+    ) -> Status {
+        EMPTY_CALLS.fetch_add(1, Ordering::SeqCst);
+        unsafe { *required = 0 };
+        Status::Ok
+    }
+
     #[test]
     fn repository_retries_owned_bytes_buffer() {
         let host = RawHostApiV1 {
@@ -663,5 +1097,15 @@ mod tests {
             set_status: None,
         };
         assert_eq!(Repository::new(&host).query(0, &[]).unwrap(), &b"bytes"[..]);
+
+        EMPTY_CALLS.store(0, Ordering::SeqCst);
+        let host = RawHostApiV1 {
+            abi_version: ABI_VERSION,
+            context: null_mut(),
+            query: Some(empty_query),
+            set_status: None,
+        };
+        assert!(Repository::new(&host).query(0, &[]).unwrap().is_empty());
+        assert_eq!(EMPTY_CALLS.load(Ordering::SeqCst), 1);
     }
 }

@@ -11,9 +11,14 @@ tasks:
     deps: [test]
 
   test:
-    deps: [fixture, shim]
+    deps: [fixture, shim, ui-test]
     cmds:
       - cargo test
+
+  ui-test:
+    cmds:
+      - '"{{ .CSC }}" /nologo /target:exe /out:"{{ .TEMP }}\\UiBridgeCheck.exe" /reference:System.Windows.Forms.dll managed\\UiBridge.cs managed\\UiBridgeCheck.cs'
+      - '"{{ .TEMP }}\\UiBridgeCheck.exe"'
 
   fixture:
     cmds:
@@ -22,4 +27,4 @@ tasks:
 
   shim:
     cmds:
-      - '"{{ .CSC }}" /nologo /target:library /out:managed\\Shim.template.dll /reference:"{{ .ACT_EXE }}" /reference:FFXIV_ACT_Plugin_SDK_3.0.3.0\\SDK\\FFXIV_ACT_Plugin.Common.dll /reference:System.Windows.Forms.dll managed\\Shim.cs'
+      - '"{{ .CSC }}" /nologo /target:library /out:managed\\Shim.template.dll /reference:"{{ .ACT_EXE }}" /reference:FFXIV_ACT_Plugin_SDK_3.0.3.0\\SDK\\FFXIV_ACT_Plugin.Common.dll /reference:System.Windows.Forms.dll managed\\Shim.cs managed\\UiBridge.cs'

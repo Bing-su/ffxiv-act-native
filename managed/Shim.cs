@@ -144,7 +144,8 @@ namespace FfxivActNative.Generated
             {
                 byte[] result = QueryCore(query, request, checked((int)requestLength.ToUInt64()));
                 required = new UIntPtr((uint)result.Length);
-                if (output == IntPtr.Zero || outputLength.ToUInt64() < (ulong)result.Length)
+                if (result.Length != 0
+                    && (output == IntPtr.Zero || outputLength.ToUInt64() < (ulong)result.Length))
                     return 6;
                 if (result.Length != 0)
                     Marshal.Copy(result, 0, output, result.Length);
@@ -154,13 +155,23 @@ namespace FfxivActNative.Generated
             catch (Exception ex)
             {
                 required = UIntPtr.Zero;
-                Plugin.SetStatus("FFXIV ACT native repository error: " + ex.Message);
+                Plugin.SetStatus("FFXIV ACT native query error: " + ex.Message);
                 return 4;
             }
         }
 
         private static byte[] QueryCore(uint query, IntPtr request, int requestLength)
         {
+            if (query == 0x100)
+            {
+                if (requestLength < 0 || requestLength > 1024 * 1024 || (requestLength != 0 && request == IntPtr.Zero))
+                    throw new ArgumentException("UI command payload");
+                byte[] payload = new byte[requestLength];
+                if (requestLength != 0)
+                    Marshal.Copy(request, payload, 0, requestLength);
+                UiBridge.Queue(payload);
+                return new byte[0];
+            }
             if (repository == null)
                 throw new InvalidOperationException("repository unavailable");
 
@@ -271,6 +282,11 @@ namespace FfxivActNative.Generated
             {
                 Plugin.SetStatus("FFXIV ACT native event error: " + ex.Message);
             }
+        }
+
+        internal static void SendRaw(uint kind, byte[] bytes)
+        {
+            Send(kind, delegate(BinaryWriter writer) { writer.Write(bytes); });
         }
 
         private static void NetworkReceived(string connection, long timestamp, byte[] bytes)
@@ -470,9 +486,11 @@ namespace FfxivActNative.Generated
             statusLabel = pluginStatusText;
             try
             {
+                UiBridge.Bind(pluginScreenSpace);
                 object subscriptions, repository;
                 if (!FindServices(out subscriptions, out repository))
                 {
+                    UiBridge.Stop();
                     SetStatus("FFXIV ACT native: enable FFXIV_ACT_Plugin first");
                     return;
                 }
@@ -493,10 +511,12 @@ namespace FfxivActNative.Generated
                     throw new InvalidOperationException("invalid native ABI");
 
                 CommonBridge.Subscribe(client);
+                UiBridge.Start();
                 SetStatus("FFXIV ACT native loaded");
             }
             catch (Exception ex)
             {
+                UiBridge.Stop();
                 CommonBridge.Stop();
                 Unload();
                 SetStatus("FFXIV ACT native: " + ex.Message);
@@ -505,6 +525,7 @@ namespace FfxivActNative.Generated
 
         public void DeInitPlugin()
         {
+            UiBridge.Stop();
             CommonBridge.Unsubscribe();
             try
             {

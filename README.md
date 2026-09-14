@@ -40,6 +40,26 @@ impl Plugin for MyPlugin {
 export_plugin!(MyPlugin);
 ```
 
+ACT가 제공한 플러그인 탭에는 `Repository::ui`로 WinForms 컨트롤을 추가하고
+갱신할 수 있습니다. UI 명령은 비동기로 적용되며 버튼이나 입력 변경은
+`Event::Ui`로 전달됩니다.
+
+```rust,no_run
+use ffxiv_act_native::{Repository, UiCommand, UiControl};
+
+fn add_ui(repository: Repository<'_>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    repository.ui(UiCommand::Add {
+        parent: None,
+        control: UiControl::Button { id: 1, text: "Refresh".into() },
+    })?;
+    Ok(())
+}
+```
+
+지원 컨트롤은 세로 root, 가로 `Row`, label, button, checkbox, textbox,
+combo box, number 및 최대 행 수가 제한된 log list입니다. 컨트롤 ID는 플러그인
+내에서 고유해야 하며 실제 적용 오류는 `UiEvent::Error`로 보고됩니다.
+
 `embedded-contracts` 피처를 build dependency에서 활성화하면 ACT나 SDK 설치 없이
 shim을 함께 빌드할 수 있습니다.
 
