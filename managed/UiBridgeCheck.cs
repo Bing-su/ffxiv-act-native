@@ -53,6 +53,13 @@ namespace FfxivActNative.Generated
 
                 FlowLayoutPanel row = (FlowLayoutPanel)page.Controls[0].Controls[0];
                 CheckBox check = (CheckBox)row.Controls[0];
+                UiBridge.Queue(AddColumn(7));
+                UiBridge.Queue(AddCheckBox(7, 8, "Narrow"));
+                Wait(delegate { return page.Controls[0].Controls.Count == 2; });
+                FlowLayoutPanel column = (FlowLayoutPanel)page.Controls[0].Controls[1];
+                Assert(column.FlowDirection == FlowDirection.TopDown && !column.WrapContents,
+                    "column layout is not vertical");
+                Assert(column.Controls[0].Width < column.Width, "column child filled the tab width");
                 UiBridge.Queue(SetChecked(2, true));
                 Wait(delegate { return check.Checked; });
                 Thread.Sleep(20);
@@ -66,8 +73,8 @@ namespace FfxivActNative.Generated
                 UiBridge.Queue(AppendLog(3, "one"));
                 UiBridge.Queue(AppendLog(3, "two"));
                 UiBridge.Queue(AppendLog(3, "three"));
-                Wait(delegate { return page.Controls[0].Controls.Count == 2; });
-                ListBox log = (ListBox)page.Controls[0].Controls[1];
+                Wait(delegate { return page.Controls[0].Controls.Count == 3; });
+                ListBox log = (ListBox)page.Controls[0].Controls[2];
                 Wait(delegate { return log.Items.Count == 2; });
                 Assert((string)log.Items[0] == "two", "log limit did not remove oldest row");
 
@@ -75,9 +82,9 @@ namespace FfxivActNative.Generated
                 UiBridge.Queue(SetItems(4));
                 UiBridge.Queue(AddNumber(5));
                 UiBridge.Queue(SetNumber(5, 7));
-                Wait(delegate { return page.Controls[0].Controls.Count == 4; });
-                ComboBox combo = (ComboBox)page.Controls[0].Controls[2];
-                NumericUpDown number = (NumericUpDown)page.Controls[0].Controls[3];
+                Wait(delegate { return page.Controls[0].Controls.Count == 5; });
+                ComboBox combo = (ComboBox)page.Controls[0].Controls[3];
+                NumericUpDown number = (NumericUpDown)page.Controls[0].Controls[4];
                 Wait(delegate { return combo.Items.Count == 2 && combo.SelectedIndex == 1 && number.Value == 7; });
                 Assert(EventCount() == 1, "programmatic selection or number update emitted an event");
 
@@ -100,7 +107,7 @@ namespace FfxivActNative.Generated
                 Assert(malformed, "malformed command was accepted");
 
                 UiBridge.Queue(Remove(3));
-                Wait(delegate { return page.Controls[0].Controls.Count == 3; });
+                Wait(delegate { return page.Controls[0].Controls.Count == 4; });
                 UiBridge.Stop();
                 Assert(page.Controls.Count == 0, "UI was not removed on stop");
             }
@@ -136,6 +143,16 @@ namespace FfxivActNative.Generated
                 writer.Write(id);
             });
         }
+        private static byte[] AddColumn(uint id)
+        {
+            return Write(delegate(BinaryWriter writer)
+            {
+                writer.Write((byte)0);
+                writer.Write((byte)0);
+                writer.Write((byte)1);
+                writer.Write(id);
+            });
+        }
         private static byte[] AddCheckBox(uint parent, uint id, string text)
         {
             return Write(delegate(BinaryWriter writer)
@@ -143,7 +160,7 @@ namespace FfxivActNative.Generated
                 writer.Write((byte)0);
                 writer.Write((byte)1);
                 writer.Write(parent);
-                writer.Write((byte)3);
+                writer.Write((byte)4);
                 writer.Write(id);
                 String(writer, text);
                 writer.Write((byte)0);
@@ -164,7 +181,7 @@ namespace FfxivActNative.Generated
             {
                 writer.Write((byte)0);
                 writer.Write((byte)0);
-                writer.Write((byte)7);
+                writer.Write((byte)8);
                 writer.Write(id);
                 writer.Write(maxRows);
             });
@@ -175,7 +192,7 @@ namespace FfxivActNative.Generated
             {
                 writer.Write((byte)0);
                 writer.Write((byte)0);
-                writer.Write((byte)5);
+                writer.Write((byte)6);
                 writer.Write(id);
                 writer.Write((uint)1);
                 String(writer, "one");
@@ -201,7 +218,7 @@ namespace FfxivActNative.Generated
             {
                 writer.Write((byte)0);
                 writer.Write((byte)0);
-                writer.Write((byte)6);
+                writer.Write((byte)7);
                 writer.Write(id);
                 writer.Write((long)0);
                 writer.Write((long)10);
@@ -225,7 +242,7 @@ namespace FfxivActNative.Generated
                 writer.Write((byte)0);
                 writer.Write((byte)1);
                 writer.Write(parent);
-                writer.Write((byte)1);
+                writer.Write((byte)2);
                 writer.Write(id);
                 String(writer, "label");
             });

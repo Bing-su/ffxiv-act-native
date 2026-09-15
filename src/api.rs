@@ -154,6 +154,9 @@ pub enum UiControl {
     Row {
         id: u32,
     },
+    Column {
+        id: u32,
+    },
     Label {
         id: u32,
         text: String,
@@ -351,18 +354,19 @@ impl UiControl {
     fn encode(&self, bytes: &mut BytesMut) -> Result<(), RepositoryError> {
         let (kind, id) = match self {
             Self::Row { id } => (0, *id),
-            Self::Label { id, .. } => (1, *id),
-            Self::Button { id, .. } => (2, *id),
-            Self::CheckBox { id, .. } => (3, *id),
-            Self::TextBox { id, .. } => (4, *id),
-            Self::ComboBox { id, .. } => (5, *id),
-            Self::Number { id, .. } => (6, *id),
-            Self::LogList { id, .. } => (7, *id),
+            Self::Column { id } => (1, *id),
+            Self::Label { id, .. } => (2, *id),
+            Self::Button { id, .. } => (3, *id),
+            Self::CheckBox { id, .. } => (4, *id),
+            Self::TextBox { id, .. } => (5, *id),
+            Self::ComboBox { id, .. } => (6, *id),
+            Self::Number { id, .. } => (7, *id),
+            Self::LogList { id, .. } => (8, *id),
         };
         bytes.put_u8(kind);
         bytes.put_u32_le(id);
         match self {
-            Self::Row { .. } => {}
+            Self::Row { .. } | Self::Column { .. } => {}
             Self::Label { text, .. } | Self::Button { text, .. } | Self::TextBox { text, .. } => {
                 put_string(bytes, text)?;
             }
@@ -940,7 +944,7 @@ mod tests {
         assert_eq!(
             command.encode().unwrap(),
             &[
-                0, 1, 7, 0, 0, 0, 3, 8, 0, 0, 0, 7, 0, 0, 0, b'E', b'n', b'a', b'b', b'l', b'e',
+                0, 1, 7, 0, 0, 0, 4, 8, 0, 0, 0, 7, 0, 0, 0, b'E', b'n', b'a', b'b', b'l', b'e',
                 b'd', 1,
             ][..]
         );
@@ -965,6 +969,7 @@ mod tests {
     fn encodes_every_ui_command_and_control() {
         let controls = [
             UiControl::Row { id: 1 },
+            UiControl::Column { id: 9 },
             UiControl::Label {
                 id: 2,
                 text: "label".into(),

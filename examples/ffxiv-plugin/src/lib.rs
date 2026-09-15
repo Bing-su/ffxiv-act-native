@@ -15,6 +15,7 @@ const REFRESH: u32 = 3;
 const LANGUAGE: u32 = 4;
 const LIMIT: u32 = 5;
 const LOG: u32 = 6;
+const CONTROLS: u32 = 7;
 
 struct FfxivPlugin(BufWriter<File>);
 
@@ -33,6 +34,10 @@ impl Plugin for FfxivPlugin {
         )?;
         repository.ui(UiCommand::Add {
             parent: None,
+            control: UiControl::Column { id: CONTROLS },
+        })?;
+        repository.ui(UiCommand::Add {
+            parent: Some(CONTROLS),
             control: UiControl::Row { id: OPTIONS },
         })?;
         repository.ui(UiCommand::Add {
@@ -51,7 +56,7 @@ impl Plugin for FfxivPlugin {
             },
         })?;
         repository.ui(UiCommand::Add {
-            parent: None,
+            parent: Some(CONTROLS),
             control: UiControl::ComboBox {
                 id: LANGUAGE,
                 items: vec!["English".into(), "Japanese".into()],
@@ -59,7 +64,7 @@ impl Plugin for FfxivPlugin {
             },
         })?;
         repository.ui(UiCommand::Add {
-            parent: None,
+            parent: Some(CONTROLS),
             control: UiControl::Number {
                 id: LIMIT,
                 min: 1,

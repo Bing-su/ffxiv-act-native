@@ -205,9 +205,18 @@ namespace FfxivActNative.Generated
                     };
                     break;
                 case 1:
-                    control = new Label { AutoSize = true, Text = command.Text };
+                    control = new FlowLayoutPanel
+                    {
+                        AutoSize = true,
+                        Dock = DockStyle.Fill,
+                        FlowDirection = FlowDirection.TopDown,
+                        WrapContents = false,
+                    };
                     break;
                 case 2:
+                    control = new Label { AutoSize = true, Text = command.Text };
+                    break;
+                case 3:
                     Button button = new Button { AutoSize = true, Text = command.Text };
                     button.Click += delegate
                     {
@@ -215,7 +224,7 @@ namespace FfxivActNative.Generated
                     };
                     control = button;
                     break;
-                case 3:
+                case 4:
                     CheckBox checkBox = new CheckBox { AutoSize = true, Text = command.Text, Checked = command.Bool };
                     checkBox.CheckedChanged += delegate
                     {
@@ -224,7 +233,7 @@ namespace FfxivActNative.Generated
                     };
                     control = checkBox;
                     break;
-                case 4:
+                case 5:
                     TextBox textBox = new TextBox { Text = command.Text };
                     textBox.TextChanged += delegate
                     {
@@ -233,7 +242,7 @@ namespace FfxivActNative.Generated
                     };
                     control = textBox;
                     break;
-                case 5:
+                case 6:
                     ComboBox comboBox = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
                     comboBox.Items.AddRange(command.Items.ToArray());
                     SetSelected(comboBox, command);
@@ -244,7 +253,7 @@ namespace FfxivActNative.Generated
                     };
                     control = comboBox;
                     break;
-                case 6:
+                case 7:
                     NumericUpDown number = new NumericUpDown
                     {
                         Minimum = command.Min,
@@ -259,7 +268,7 @@ namespace FfxivActNative.Generated
                     };
                     control = number;
                     break;
-                case 7:
+                case 8:
                     ListBox list = new ListBox { Height = 120 };
                     logLimits.Add(id, command.MaxRows);
                     control = list;
@@ -527,21 +536,22 @@ namespace FfxivActNative.Generated
                             switch (value.ControlKind)
                             {
                                 case 0:
-                                    break;
                                 case 1:
+                                    break;
                                 case 2:
-                                case 4:
+                                case 3:
+                                case 5:
                                     value.Text = reader.String();
                                     break;
-                                case 3:
+                                case 4:
                                     value.Text = reader.String();
                                     value.Bool = reader.Bool();
                                     break;
-                                case 5:
+                                case 6:
                                     value.Items = reader.Strings();
                                     ReadSelected(reader, value);
                                     break;
-                                case 6:
+                                case 7:
                                     value.Min = reader.Int64();
                                     value.Max = reader.Int64();
                                     value.Step = reader.Int64();
@@ -552,7 +562,7 @@ namespace FfxivActNative.Generated
                                         || value.Value > value.Max)
                                         throw new ArgumentOutOfRangeException("number");
                                     break;
-                                case 7:
+                                case 8:
                                     value.MaxRows = reader.UInt32();
                                     if (value.MaxRows == 0 || value.MaxRows > 10000)
                                         throw new ArgumentOutOfRangeException("maxRows");
