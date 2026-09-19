@@ -516,7 +516,11 @@ mod tests {
 
     #[test]
     fn rejects_paths_and_non_dll_native_names() {
-        for name in ["", "native", "dir/native.dll", "dir\\native.dll"] {
+        let mut names = vec!["", "native", "dir/native.dll"];
+        if cfg!(windows) {
+            names.push("dir\\native.dll");
+        }
+        for name in names {
             let config = PluginConfig {
                 assembly_name: "Test".into(),
                 native_dll_name: name.into(),
