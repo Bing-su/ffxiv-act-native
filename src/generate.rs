@@ -496,10 +496,12 @@ fn write_error(error: Error) -> GenerateError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    use std::path::Path;
     use std::{
         env,
         fs::{read, remove_file, write},
-        path::{Path, PathBuf},
+        path::PathBuf,
         process::{Command, id},
     };
 
