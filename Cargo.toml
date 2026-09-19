@@ -2,11 +2,15 @@
 name = "ffxiv-act-native"
 version = "0.1.0"
 edition = "2024"
-description = "FFXIV ACT native plugin in Rust"
+description = "FFXIV ACT plugin in Rust"
+repository = "https://github.com/Bing-su/ffxiv-act-native"
 license = "BlueOak-1.0.0"
 
 [workspace]
 members = ["examples/*"]
+
+[workspace.dependencies]
+ffxiv-act-native = { path = "." }
 
 [dependencies]
 bitflags = "2"

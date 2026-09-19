@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-ffxiv-act-native = { path = "../.." }
+ffxiv-act-native = { workspace = true }
 
 [build-dependencies]
-ffxiv-act-native = { path = "../..", features = ["embedded-contracts"] }
+ffxiv-act-native = { workspace = true, features = ["embedded-contracts"] }
