@@ -286,7 +286,7 @@ namespace FfxivActNative.Generated
 
         internal static void SendRaw(uint kind, byte[] bytes)
         {
-            Send(kind, delegate(BinaryWriter writer) { writer.Write(bytes); });
+            Send(kind, delegate (BinaryWriter writer) { writer.Write(bytes); });
         }
 
         private static void NetworkReceived(string connection, long timestamp, byte[] bytes)
@@ -513,7 +513,7 @@ namespace FfxivActNative.Generated
 
                 CommonBridge.Subscribe(client);
                 UiBridge.Start();
-                SetStatus("FFXIV ACT native loaded");
+                SetStatus("FFXIV ACT native: Ready");
             }
             catch (Exception ex)
             {
