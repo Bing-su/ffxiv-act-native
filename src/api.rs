@@ -9,35 +9,70 @@ use crate::{DecodeError, RawHostApiV1, Status};
 const UI_QUERY: u32 = 0x100;
 const MAX_UI_PAYLOAD: usize = 1024 * 1024;
 
+/// Thread-safe error returned by plugin callbacks.
+///
+/// A boxed trait object lets plugin crates use their existing error types
+/// without coupling the ABI to a particular error library.
 pub type PluginError = Box<dyn Error + Send + Sync + 'static>;
+/// Result type expected from plugin lifecycle callbacks.
 pub type PluginResult<T> = Result<T, PluginError>;
 
 bitflags::bitflags! {
+    /// Selects which ACT events cross the managed/native boundary.
+    ///
+    /// Subscribe only to events the plugin handles to avoid unnecessary FFI
+    /// calls. Flags can be combined with the bitwise OR operator.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use ffxiv_act_native::SubscriptionSet;
+    ///
+    /// let subscriptions = SubscriptionSet::ZONE_CHANGED
+    ///     | SubscriptionSet::PARTY_LIST_CHANGED;
+    /// ```
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
     pub struct SubscriptionSet: u32 {
+        /// Disables all managed event subscriptions.
         const NONE = 0;
+        /// Receives packets read from the game connection.
         const NETWORK_RECEIVED = 1 << 0;
+        /// Receives packets written to the game connection.
         const NETWORK_SENT = 1 << 1;
+        /// Receives combatants as they enter the repository snapshot.
         const COMBATANT_ADDED = 1 << 2;
+        /// Receives combatants as they leave the repository snapshot.
         const COMBATANT_REMOVED = 1 << 3;
+        /// Receives notification when the local player changes.
         const PRIMARY_PLAYER_CHANGED = 1 << 4;
+        /// Receives territory changes.
         const ZONE_CHANGED = 1 << 5;
+        /// Receives updated local-player attributes.
         const PLAYER_STATS_CHANGED = 1 << 6;
+        /// Receives party membership changes.
         const PARTY_LIST_CHANGED = 1 << 7;
+        /// Receives raw ACT log lines.
         const LOG_LINE = 1 << 8;
+        /// Receives parsed ACT log lines.
         const PARSED_LOG_LINE = 1 << 9;
+        /// Receives game process attachment changes.
         const PROCESS_CHANGED = 1 << 10;
+        /// Enables every managed event subscription.
         const ALL = (1 << 11) - 1;
     }
 }
 
 #[derive(Debug)]
+/// Value returned by [`Plugin::init`] to install the plugin and its subscriptions.
 pub struct PluginInit<P> {
+    /// Initialized plugin state retained until shutdown.
     pub plugin: P,
+    /// Events the managed shim should forward to the plugin.
     pub subscriptions: SubscriptionSet,
 }
 
 impl<P> PluginInit<P> {
+    /// Couples initialized state with its event subscriptions.
     pub fn new(plugin: P, subscriptions: SubscriptionSet) -> Self {
         Self {
             plugin,
@@ -46,6 +81,12 @@ impl<P> PluginInit<P> {
     }
 }
 
+/// Lifecycle implemented by a native ACT plugin.
+///
+/// Callbacks are serialized, so implementations may mutate their state without
+/// adding an internal lock. Returning an error stops later event delivery and
+/// reports the message to ACT, preventing a failing plugin from repeatedly
+/// crossing the FFI boundary.
 pub trait Plugin: Send + 'static {
     /// Creates the plugin and selects the events it wants to receive.
     fn init(repository: Repository<'_>) -> PluginResult<PluginInit<Self>>
@@ -53,26 +94,48 @@ pub trait Plugin: Send + 'static {
         Self: Sized;
 
     /// Handles one subscribed ACT event.
+    ///
+    /// The event and repository borrow callback-owned data and must not be
+    /// retained after this method returns.
     fn on_event(&mut self, repository: Repository<'_>, event: Event<'_>) -> PluginResult<()>;
 
     /// Releases resources before the managed shim unloads the plugin.
+    ///
+    /// Explicit shutdown exists so native resources can be released before ACT
+    /// unloads the managed bridge.
     fn shutdown(&mut self, repository: Repository<'_>) -> PluginResult<()>;
 }
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Numeric tags used to identify event payloads in ABI v1.
+///
+/// The explicit representation keeps Rust and the managed shim in agreement
+/// without relying on compiler-specific enum layout.
 pub enum EventKind {
+    /// Incoming game network data.
     NetworkReceived = 0,
+    /// Outgoing game network data.
     NetworkSent = 1,
+    /// A combatant entered the current snapshot.
     CombatantAdded = 2,
+    /// A combatant left the current snapshot.
     CombatantRemoved = 3,
+    /// The local player identity changed.
     PrimaryPlayerChanged = 4,
+    /// The current territory changed.
     ZoneChanged = 5,
+    /// The local player's attributes changed.
     PlayerStatsChanged = 6,
+    /// Party membership changed.
     PartyListChanged = 7,
+    /// An unparsed ACT log line arrived.
     LogLine = 8,
+    /// A parsed ACT log line arrived.
     ParsedLogLine = 9,
+    /// ACT attached to or detached from a game process.
     ProcessChanged = 10,
+    /// A control on the generated plugin tab produced an event.
     Ui = 11,
 }
 
@@ -100,6 +163,10 @@ impl TryFrom<u32> for EventKind {
 }
 
 #[derive(Debug)]
+/// Typed event delivered to [`Plugin::on_event`].
+///
+/// Borrowed strings and byte slices point into the callback payload, avoiding
+/// allocations on high-frequency network and log events.
 pub enum Event<'a> {
     NetworkReceived {
         connection: &'a str,
@@ -140,6 +207,10 @@ pub enum Event<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// User interaction or validation failure from the generated ACT tab.
+///
+/// Control IDs are assigned by the plugin so one event can be matched directly
+/// to the [`UiControl`] that produced it.
 pub enum UiEvent<'a> {
     Clicked { id: u32 },
     CheckedChanged { id: u32, checked: bool },
@@ -150,6 +221,10 @@ pub enum UiEvent<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Declarative control that can be added to the generated ACT tab.
+///
+/// The intentionally small control set keeps UI behavior in the managed shim
+/// while plugin state remains in Rust.
 pub enum UiControl {
     Row {
         id: u32,
@@ -193,6 +268,23 @@ pub enum UiControl {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Incremental update sent to the generated ACT tab.
+///
+/// Commands avoid exposing managed UI objects across FFI. They are queued with
+/// [`Repository::ui`].
+///
+/// # Example
+///
+/// ```no_run
+/// # use ffxiv_act_native::{Repository, UiCommand, UiControl};
+/// # fn add_button(repository: Repository<'_>) -> Result<(), Box<dyn std::error::Error>> {
+/// repository.ui(UiCommand::Add {
+///     parent: None,
+///     control: UiControl::Button { id: 1, text: "Refresh".into() },
+/// })?;
+/// # Ok(())
+/// # }
+/// ```
 pub enum UiCommand {
     Add {
         parent: Option<u32>,
@@ -424,6 +516,10 @@ fn put_option_u32(bytes: &mut BytesMut, value: Option<u32>) {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Network status effect attached to a [`Combatant`] snapshot.
+///
+/// Values mirror the public SDK model so plugins can inspect status ownership
+/// and duration without depending on managed types.
 pub struct NetworkBuff {
     pub buff_id: u16,
     pub buff_extra: u16,
@@ -436,6 +532,10 @@ pub struct NetworkBuff {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Owned snapshot of one combatant from the ACT data repository.
+///
+/// The model is owned because repository query buffers are temporary; callers
+/// may safely retain a snapshot after the callback returns.
 pub struct Combatant {
     pub id: u32,
     pub owner_id: u32,
@@ -474,6 +574,10 @@ pub struct Combatant {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+/// Owned snapshot of the local player's combat attributes.
+///
+/// The fields mirror the public SDK `Player` model to preserve their original
+/// meaning and numeric representation across the ABI.
 pub struct Player {
     pub job_id: u32,
     pub strength: u32,
@@ -692,17 +796,38 @@ impl<'a> Cursor<'a> {
     }
 }
 
+/// Borrowed access to managed ACT repository services during a callback.
+///
+/// The handle is deliberately neither `Send` nor `Sync`: managed callbacks may
+/// arrive on different CLR threads, but repository use stays on the current
+/// serialized callback.
+///
+/// # Example
+///
+/// ```no_run
+/// # use ffxiv_act_native::{Repository, RepositoryError};
+/// # fn inspect(repository: Repository<'_>) -> Result<(), RepositoryError> {
+/// let territory = repository.current_territory_id()?;
+/// let combatants = repository.combatants()?;
+/// println!("{territory}: {} combatants", combatants.len());
+/// # Ok(())
+/// # }
+/// ```
 pub struct Repository<'a> {
     host: &'a RawHostApiV1,
     _not_send: PhantomData<Rc<()>>,
 }
 
 #[derive(Debug, thiserror::Error)]
+/// Failure returned while calling a managed repository service.
 pub enum RepositoryError {
+    /// The managed host rejected or could not complete the query.
     #[error("managed query failed with status {0:?}")]
     Status(Status),
+    /// The host returned bytes that do not match the expected wire format.
     #[error("managed repository returned malformed data")]
     Malformed,
+    /// A UI command cannot be represented safely by the managed bridge.
     #[error("invalid UI command: {0}")]
     InvalidUi(&'static str),
 }
@@ -717,6 +842,9 @@ impl<'a> Repository<'a> {
     }
 
     /// Executes a raw managed repository query and returns its payload.
+    ///
+    /// This escape hatch supports ABI queries not yet covered by typed helpers;
+    /// prefer those helpers when available so payload decoding remains central.
     pub fn query(&self, query: u32, request: &[u8]) -> Result<Bytes, RepositoryError> {
         let Some(query_fn) = self.host.query else {
             return Err(RepositoryError::Status(Status::NotInitialized));
@@ -769,6 +897,9 @@ impl<'a> Repository<'a> {
     }
 
     /// Queues one update for the ACT plugin tab.
+    ///
+    /// UI mutation is routed through the host so Rust never owns or calls a
+    /// managed control directly.
     pub fn ui(&self, command: UiCommand) -> Result<(), RepositoryError> {
         self.query(UI_QUERY, &command.encode()?).map(|_| ())
     }
@@ -781,7 +912,7 @@ impl<'a> Repository<'a> {
     pub fn current_territory_id(&self) -> Result<u32, RepositoryError> {
         self.u32_query(2)
     }
-    /// Returns the selected game language ID.
+    /// Returns the selected game language ID used by SDK resource lookups.
     pub fn selected_language(&self) -> Result<i32, RepositoryError> {
         let bytes = self.query(3, &[])?;
         bytes
@@ -808,7 +939,7 @@ impl<'a> Repository<'a> {
     pub fn current_process_id(&self) -> Result<u32, RepositoryError> {
         self.u32_query(9)
     }
-    /// Returns the server timestamp in .NET ticks.
+    /// Returns the server timestamp in .NET ticks for comparison with SDK times.
     pub fn server_timestamp_ticks(&self) -> Result<i64, RepositoryError> {
         let bytes = self.query(10, &[])?;
         bytes
@@ -867,6 +998,9 @@ impl<'a> Repository<'a> {
     }
 
     /// Returns the requested localized resource dictionary.
+    ///
+    /// `resource_type` uses the numeric value of the public SDK `ResourceType`
+    /// enum so the native ABI does not need to duplicate a versioned enum.
     pub fn resource_dictionary(
         &self,
         resource_type: i32,

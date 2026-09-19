@@ -33,15 +33,39 @@ impl<'a> MetadataValue<'a> {
 /// Windows file metadata for the generated managed shim.
 ///
 /// String values are limited to 2048 UTF-16 code units.
+/// Keeping assembly and file versions separate allows .NET binding identity to
+/// remain stable while the distributable file receives independent releases.
+///
+/// # Example
+///
+/// ```
+/// use ffxiv_act_native::PluginMetadata;
+///
+/// let metadata = PluginMetadata {
+///     assembly_version: [1, 0, 0, 0],
+///     file_version: [1, 2, 3, 0],
+///     product_version: "1.2.3".into(),
+///     product_name: "Example ACT Plugin".into(),
+///     ..PluginMetadata::default()
+/// };
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginMetadata {
+    /// Four-part version used by the .NET assembly identity.
     pub assembly_version: [u16; 4],
+    /// Four-part numeric version shown in Windows file properties.
     pub file_version: [u16; 4],
+    /// Display version, which may include a suffix such as `1.2.3-beta.1`.
     pub product_version: String,
+    /// Short description shown in Windows file properties.
     pub file_description: String,
+    /// Product family shown in Windows file properties.
     pub product_name: String,
+    /// Publisher shown in Windows file properties.
     pub company_name: String,
+    /// Copyright notice shown in Windows file properties.
     pub legal_copyright: String,
+    /// Optional release or build note shown in Windows file properties.
     pub comments: String,
 }
 
@@ -130,7 +154,7 @@ pub(crate) fn apply_version_resource(
         .try_build()
         .map_err(|error| GenerateError::Write(format!("{error:?}")))?;
 
-    // ponytail: fixed template capacity avoids PE section rewriting; enlarge the placeholder if needed.
+    // Fixed template capacity avoids PE section rewriting; enlarge the placeholder if needed.
     let marker: Vec<_> = "VS_VERSION_INFO"
         .encode_utf16()
         .chain([0])

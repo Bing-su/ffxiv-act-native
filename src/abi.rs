@@ -8,21 +8,47 @@ use std::{
 
 use crate::{Event, Plugin, PluginInit, Repository};
 
+/// Version implemented by the raw managed/native ABI types in this crate.
+///
+/// Both sides check this value before exchanging callbacks so incompatible
+/// structure layouts fail cleanly instead of causing undefined behavior.
 pub const ABI_VERSION: u32 = 1;
 
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Status code returned across the managed/native ABI boundary.
+///
+/// A fixed integer representation lets C# consume failures without depending
+/// on Rust-specific error layout.
 pub enum Status {
+    /// The operation completed successfully.
     Ok = 0,
+    /// A pointer, payload, or other argument was invalid.
     InvalidArgument = 1,
+    /// The caller and plugin use different ABI versions.
     AbiMismatch = 2,
+    /// The plugin or requested host service is not initialized.
     NotInitialized = 3,
+    /// Plugin code returned an error.
     PluginError = 4,
+    /// A panic was caught before it could cross FFI.
     Panic = 5,
+    /// The supplied output buffer is too small and should be retried.
     BufferTooSmall = 6,
+    /// The operation cannot continue because shutdown has begun.
     Shutdown = 7,
 }
 
+/// Managed host callback used to execute a repository query.
+///
+/// The first call may use a null output pointer to discover `required`; a retry
+/// supplies that many bytes. This two-call shape avoids transferring allocator
+/// ownership across FFI.
+///
+/// # Safety
+///
+/// All non-null pointers must be valid for their stated lengths for the duration
+/// of the call, and `required` must be writable.
 pub type QueryFn = unsafe extern "system" fn(
     context: *mut c_void,
     query: u32,
@@ -33,40 +59,81 @@ pub type QueryFn = unsafe extern "system" fn(
     required: *mut usize,
 ) -> Status;
 
+/// Managed host callback used to display plugin status text in ACT.
+///
+/// # Safety
+///
+/// The byte pointer must contain valid UTF-8 for the supplied length and remain
+/// readable for the duration of the call.
 pub type SetStatusFn = unsafe extern "system" fn(*mut c_void, *const u8, usize);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+/// Function table supplied by the managed shim to a native plugin.
+///
+/// `repr(C)` and the version field make this table safe to mirror in managed
+/// interop declarations after the caller validates [`ABI_VERSION`].
 pub struct RawHostApiV1 {
+    /// ABI version used to lay out this table.
     pub abi_version: u32,
+    /// Opaque value passed back to every host callback.
     pub context: *mut c_void,
+    /// Optional repository-query callback.
     pub query: Option<QueryFn>,
+    /// Optional callback for reporting plugin errors to ACT.
     pub set_status: Option<SetStatusFn>,
 }
 
-// Managed delegates can enter on different CLR threads. The plugin is kept
-// behind one lock so user code only observes serialized callbacks.
+// SAFETY: managed delegates may enter on different CLR threads, but the opaque
+// context is only passed back to host functions while one global lock serializes
+// plugin callbacks; Rust code never dereferences it.
 unsafe impl Send for RawHostApiV1 {}
 unsafe impl Sync for RawHostApiV1 {}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+/// Borrowed event descriptor passed from the managed shim.
+///
+/// The payload remains owned by the caller and is decoded only during the event
+/// callback, avoiding a copy at the FFI boundary.
 pub struct RawEventV1 {
+    /// Numeric [`crate::EventKind`] tag.
     pub kind: u32,
+    /// Start of the encoded payload, or null when `payload_len` is zero.
     pub payload: *const u8,
+    /// Number of readable bytes at `payload`.
     pub payload_len: usize,
 }
 
+/// Native callback used by the managed shim to deliver one event.
+///
+/// # Safety
+///
+/// `RawEventV1` and its payload must remain readable for the duration of the call.
 pub type EventFn = unsafe extern "system" fn(*mut c_void, *const RawEventV1) -> Status;
+/// Native callback used by the managed shim to release the plugin.
+///
+/// # Safety
+///
+/// The context must be the value published in [`RawClientApiV1`].
 pub type ShutdownFn = unsafe extern "system" fn(*mut c_void) -> Status;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+/// Function table returned by the native plugin to the managed shim.
+///
+/// The table publishes only stable callbacks and primitive values so neither
+/// runtime must understand the other's object layout.
 pub struct RawClientApiV1 {
+    /// ABI version used to lay out this table.
     pub abi_version: u32,
+    /// Raw bits of the requested [`crate::SubscriptionSet`].
     pub subscriptions: u32,
+    /// Opaque value passed to native callbacks.
     pub context: *mut c_void,
+    /// Callback that accepts subscribed ACT events.
     pub on_event: EventFn,
+    /// Callback that releases native plugin state.
     pub shutdown: ShutdownFn,
 }
 
@@ -124,6 +191,9 @@ fn state() -> &'static Mutex<Option<State>> {
 }
 
 /// Starts `P` for the managed ABI v1 caller.
+///
+/// This is public only to support [`crate::export_plugin`]; plugin crates should
+/// export the macro instead of calling this function directly.
 ///
 /// # Safety
 ///

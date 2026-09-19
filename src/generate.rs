@@ -51,14 +51,58 @@ const REPOSITORY_METHODS: &[&str] = &[
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+/// Names and metadata written into a generated managed shim.
+///
+/// Keeping these values together ensures the PE resource, .NET assembly, and
+/// native import all describe the same plugin.
+///
+/// # Example
+///
+/// ```
+/// use ffxiv_act_native::{PluginConfig, PluginMetadata};
+///
+/// let config = PluginConfig {
+///     assembly_name: "ExamplePlugin".into(),
+///     native_dll_name: "example_plugin.dll".into(),
+///     tab_name: "Example".into(),
+///     metadata: PluginMetadata::default(),
+/// };
+/// ```
 pub struct PluginConfig {
+    /// Simple .NET assembly name, without a path or `.dll` suffix.
     pub assembly_name: String,
+    /// File name of the native `cdylib` loaded by the shim.
     pub native_dll_name: String,
+    /// Text shown on the plugin's ACT tab.
     pub tab_name: String,
+    /// Version and publisher information exposed by Windows and .NET.
     pub metadata: PluginMetadata,
 }
 
 /// Generates a managed ACT shim bound to the supplied native plugin DLL.
+///
+/// Contract validation happens before emission so an incompatible ACT or SDK
+/// binary fails at build time instead of when ACT loads the plugin.
+///
+/// # Example
+///
+/// ```no_run
+/// use ffxiv_act_native::{generate, PluginConfig, PluginMetadata};
+///
+/// let config = PluginConfig {
+///     assembly_name: "ExamplePlugin".into(),
+///     native_dll_name: "example_plugin.dll".into(),
+///     tab_name: "Example".into(),
+///     metadata: PluginMetadata::default(),
+/// };
+/// let shim = generate(
+///     &std::fs::read("Advanced Combat Tracker.exe")?,
+///     &std::fs::read("FFXIV_ACT_Plugin.Common.dll")?,
+///     &config,
+/// )?;
+/// std::fs::write("ExamplePlugin.dll", shim)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 pub fn generate(
     act_exe: &[u8],
     ffxiv_common: &[u8],
@@ -72,6 +116,16 @@ pub fn generate(
 }
 
 /// Generates a managed ACT shim from the embedded API contracts during a Cargo build.
+///
+/// This convenience function is intended for `build.rs`: it writes beside the
+/// consuming package's native artifact so both DLLs can be copied together.
+///
+/// # Example
+///
+/// ```ignore
+/// // build.rs, with the `embedded-contracts` feature enabled
+/// ffxiv_act_native::build_shim(&config)?;
+/// ```
 #[cfg(feature = "embedded-contracts")]
 pub fn build_shim(config: &PluginConfig) -> Result<(), Box<dyn std::error::Error>> {
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("OUT_DIR is not set")?)
