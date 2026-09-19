@@ -27,4 +27,4 @@ tasks:
 
   shim:
     cmds:
-      - '"{{ .CSC }}" /nologo /target:library /out:managed\\Shim.template.dll /reference:"{{ .ACT_EXE }}" /reference:FFXIV_ACT_Plugin_SDK_3.0.3.0\\SDK\\FFXIV_ACT_Plugin.Common.dll /reference:System.Windows.Forms.dll managed\\Shim.cs managed\\UiBridge.cs'
+      - '"{{ .CSC }}" /nologo /target:library /out:managed\\Shim.template.dll /reference:"{{ .ACT_EXE }}" /reference:FFXIV_ACT_Plugin_SDK_3.0.3.1\\SDK\\FFXIV_ACT_Plugin.Common.dll /reference:System.Windows.Forms.dll managed\\Shim.cs managed\\UiBridge.cs'

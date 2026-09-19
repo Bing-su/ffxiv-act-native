@@ -615,7 +615,7 @@ mod tests {
         let common = env::var_os("FFXIV_ACT_NATIVE_COMMON_DLL")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
-                PathBuf::from(r"FFXIV_ACT_Plugin_SDK_3.0.3.0\SDK\FFXIV_ACT_Plugin.Common.dll")
+                PathBuf::from(r"FFXIV_ACT_Plugin_SDK_3.0.3.1\SDK\FFXIV_ACT_Plugin.Common.dll")
             });
         let source = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("managed/Shim.cs")
