@@ -1,0 +1,29 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: jdx/mise-action@v4
+        with:
+          mise_toml: |
+            [tools]
+            hk = "latest"
+            tombi = "latest"
+            oxfmt = "latest"
+
+      - name: Lint (Push)
+        if: ${{ github.event_name == 'push' }}
+        run: hk check --all
+
+      - name: Lint (PR)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: hk check --pr
