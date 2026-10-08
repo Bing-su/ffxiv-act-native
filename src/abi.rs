@@ -84,10 +84,11 @@ pub struct RawHostApiV1 {
     pub set_status: Option<SetStatusFn>,
 }
 
-// SAFETY: managed delegates may enter on different CLR threads, but the opaque
-// context is only passed back to host functions while one global lock serializes
-// plugin callbacks; Rust code never dereferences it.
+// SAFETY: the shim keeps callbacks/context alive until shutdown and permits calls
+// from CLR threads; Rust only passes the opaque context back to these callbacks.
 unsafe impl Send for RawHostApiV1 {}
+// SAFETY: shared access does not dereference context; the host contract permits
+// calls from plugin callback threads and keeps callbacks/context live until shutdown.
 unsafe impl Sync for RawHostApiV1 {}
 
 #[repr(C)]
@@ -109,7 +110,9 @@ pub struct RawEventV1 {
 ///
 /// # Safety
 ///
-/// `RawEventV1` and its payload must remain readable for the duration of the call.
+/// `RawEventV1` must be aligned and readable, and its payload must remain readable
+/// and unchanged for the duration of the call. A nonempty payload must fit within
+/// one allocation and have a length no greater than `isize::MAX`.
 pub type EventFn = unsafe extern "system" fn(*mut c_void, *const RawEventV1) -> Status;
 /// Native callback used by the managed shim to release the plugin.
 ///
@@ -151,7 +154,8 @@ impl<P: Plugin> ErasedPlugin for Running<P> {
         } else if raw.payload.is_null() {
             return Status::InvalidArgument;
         } else {
-            // SAFETY: the managed caller promises the payload lives for this call.
+            // SAFETY: EventFn's caller supplies readable, unchanged bytes in one
+            // allocation (at most isize::MAX bytes) for this call; null was rejected.
             unsafe { slice::from_raw_parts(raw.payload, raw.payload_len) }
         };
         let event = match Event::decode(raw.kind, bytes) {
@@ -198,15 +202,19 @@ fn state() -> &'static Mutex<Option<State>> {
 /// # Safety
 ///
 /// `host` and `client` must either both be null to request shutdown, or point
-/// to readable/writable ABI v1 structures that remain valid for this call.
+/// to aligned, readable/writable ABI v1 structures that remain valid for this call.
+/// Host callbacks and context must remain valid until shutdown and support calls
+/// from plugin callback threads; callbacks must respect the supplied buffer lengths
+/// and must not retain borrowed buffer pointers after returning.
 pub unsafe fn start<P: Plugin>(host: *const RawHostApiV1, client: *mut RawClientApiV1) -> Status {
     if host.is_null() && client.is_null() {
+        // SAFETY: shutdown ignores its context, matching the null context published by start.
         return unsafe { shutdown(null_mut()) };
     }
     if host.is_null() || client.is_null() {
         return Status::InvalidArgument;
     }
-    // SAFETY: validated non-null and ABI structs are copied immediately.
+    // SAFETY: host is non-null; start's caller guarantees alignment and readability.
     let host = unsafe { *host };
     if host.abi_version != ABI_VERSION {
         return Status::AbiMismatch;
@@ -273,8 +281,9 @@ unsafe extern "system" fn on_event(_: *mut c_void, raw: *const RawEventV1) -> St
     if state.failed {
         return Status::PluginError;
     }
-    // SAFETY: pointer was checked and is only borrowed during this call.
     let result = catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: raw is non-null; the EventFn caller keeps the aligned descriptor
+        // and its payload readable and unchanged for this callback.
         state.plugin.event(&state.host, unsafe { &*raw })
     }));
     let panicked = result.is_err();
@@ -308,7 +317,8 @@ fn report(host: &RawHostApiV1, message: &str) {
     let Some(set_status) = host.set_status else {
         return;
     };
-    // SAFETY: message remains alive for the duration of the call.
+    // SAFETY: start's caller keeps this callback/context live; message is valid
+    // UTF-8 and remains readable for its stated length until the callback returns.
     unsafe { set_status(host.context, message.as_ptr(), message.len()) }
 }
 
@@ -352,6 +362,7 @@ mod tests {
         required: *mut usize,
     ) -> Status {
         if !required.is_null() {
+            // SAFETY: QueryFn's caller supplies aligned, writable required storage.
             unsafe { *required = 0 }
         }
         Status::Ok
@@ -374,10 +385,12 @@ mod tests {
             shutdown,
         };
         assert_eq!(
+            // SAFETY: both pointers borrow live, aligned ABI tables; host callbacks are static.
             unsafe { start::<TestPlugin>(&host, &mut client) },
             Status::Ok
         );
         assert_eq!(
+            // SAFETY: both ABI tables are still live and writable for this duplicate-init check.
             unsafe { start::<TestPlugin>(&host, &mut client) },
             Status::InvalidArgument
         );
@@ -388,10 +401,13 @@ mod tests {
             payload_len: 0,
         };
         assert_eq!(
+            // SAFETY: the published callback/context are valid, raw is live and aligned,
+            // and the null payload has zero length, so no payload bytes are read.
             unsafe { (client.on_event)(client.context, &raw) },
             Status::Ok
         );
         assert_eq!(EVENTS.load(Ordering::SeqCst), 1);
+        // SAFETY: the callback receives exactly the context published by start.
         assert_eq!(unsafe { (client.shutdown)(client.context) }, Status::Ok);
     }
 }

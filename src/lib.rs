@@ -69,12 +69,18 @@ pub use metadata::PluginMetadata;
 #[macro_export]
 macro_rules! export_plugin {
     ($plugin:ty) => {
+        /// # Safety
+        ///
+        /// The caller must satisfy the pointer and host callback requirements of
+        /// `ffxiv_act_native::__private::start`.
+        // SAFETY: this macro is used once per plugin to export the shim's ABI v1 symbol.
         #[unsafe(no_mangle)]
         pub unsafe extern "system" fn ffxiv_act_native_entry_v1(
             host: *const $crate::RawHostApiV1,
             client: *mut $crate::RawClientApiV1,
         ) -> $crate::Status {
-            // SAFETY: the managed shim owns both pointers and follows ABI v1.
+            // SAFETY: the entry point forwards the unchanged pointers and safety
+            // requirements to start; the managed shim supplies ABI v1 storage.
             unsafe { $crate::__private::start::<$plugin>(host, client) }
         }
     };

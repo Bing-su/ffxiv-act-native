@@ -422,8 +422,10 @@ fn public_key_token(identity: &Identity) -> [u8; 8] {
         Identity::PubKey(key) | Identity::EcmaKey(key) => Sha1::digest(key),
     };
     let mut token = [0; 8];
-    token.copy_from_slice(&value[value.len() - 8..]);
-    token.reverse();
+    // CLR tokens use the last eight SHA-1 bytes in reverse order.
+    for (output, byte) in token.iter_mut().zip(value.iter().rev()) {
+        *output = *byte;
+    }
     token
 }
 
@@ -513,6 +515,24 @@ mod tests {
 
     const ACT: &[u8] = include_bytes!("../managed/fixtures/Advanced Combat Tracker.exe");
     const COMMON: &[u8] = include_bytes!("../managed/fixtures/FFXIV_ACT_Plugin.Common.dll");
+
+    #[test]
+    fn public_key_token_uses_reversed_sha1_tail() {
+        // SHA-1 of "abc" ends in 7850c26c9cd0d89d; CLR tokens reverse those bytes.
+        let expected = [0x9d, 0xd8, 0xd0, 0x9c, 0x6c, 0xc2, 0x50, 0x78];
+        assert_eq!(
+            public_key_token(&Identity::PubKey(b"abc".to_vec())),
+            expected
+        );
+        assert_eq!(
+            public_key_token(&Identity::EcmaKey(b"abc".to_vec())),
+            expected
+        );
+        assert_eq!(
+            public_key_token(&Identity::Token(u64::from_be_bytes(expected))),
+            expected
+        );
+    }
 
     #[test]
     fn rejects_paths_and_non_dll_native_names() {

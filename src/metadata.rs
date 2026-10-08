@@ -165,15 +165,27 @@ pub(crate) fn apply_version_resource(
         .position(|bytes| bytes == marker)
         .and_then(|offset| offset.checked_sub(6))
         .ok_or_else(|| GenerateError::Write("could not locate shim version info".into()))?;
-    let capacity = usize::from(u16::from_le_bytes([output[offset], output[offset + 1]]));
+    let capacity_bytes = output
+        .get(offset..)
+        .and_then(|bytes| bytes.first_chunk::<2>())
+        .ok_or_else(|| GenerateError::Write("shim version info length is truncated".into()))?;
+    let capacity = usize::from(u16::from_le_bytes(*capacity_bytes));
     if replacement.len() > capacity {
         return Err(GenerateError::InvalidConfig(
             "combined metadata exceeds the shim template capacity",
         ));
     }
     drop(image);
-    output[offset..offset + capacity].fill(0);
-    output[offset..offset + replacement.len()].copy_from_slice(&replacement);
+    let slot = output
+        .get_mut(offset..)
+        .and_then(|bytes| bytes.get_mut(..capacity))
+        .ok_or_else(|| GenerateError::Write("shim version info exceeds template bounds".into()))?;
+    slot.fill(0);
+    slot.get_mut(..replacement.len())
+        .ok_or(GenerateError::InvalidConfig(
+            "combined metadata exceeds the shim template capacity",
+        ))?
+        .copy_from_slice(&replacement);
     Ok(output)
 }
 
@@ -280,7 +292,7 @@ fn parse_product_version(value: &str) -> Result<[u16; 4], GenerateError> {
         *output = if digits.is_empty() {
             0
         } else {
-            digits.parse().map_err(|_| {
+            digits.parse().map_err(|_overflow| {
                 GenerateError::InvalidConfig("product_version components must not exceed 65535")
             })?
         };
@@ -344,5 +356,24 @@ mod tests {
             &metadata,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn rejects_version_resource_capacity_outside_template() {
+        let mut template = include_bytes!("../managed/Shim.template.dll").to_vec();
+        let marker: Vec<_> = "VS_VERSION_INFO"
+            .encode_utf16()
+            .chain([0])
+            .flat_map(u16::to_le_bytes)
+            .collect();
+        let offset = template
+            .windows(marker.len())
+            .position(|v| v == marker)
+            .unwrap()
+            - 6;
+        // Simulate a corrupt resource length that extends beyond the PE image.
+        template.truncate(offset + usize::from(u16::MAX) - 1);
+        template[offset..offset + 2].copy_from_slice(&u16::MAX.to_le_bytes());
+        apply_version_resource(template, "Example", &PluginMetadata::default()).unwrap_err();
     }
 }

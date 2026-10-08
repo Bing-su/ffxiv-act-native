@@ -12,3 +12,6 @@ ffxiv-act-native = { workspace = true }
 
 [build-dependencies]
 ffxiv-act-native = { workspace = true, features = ["embedded-contracts"] }
+
+[lints]
+workspace = true

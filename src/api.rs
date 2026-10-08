@@ -491,16 +491,16 @@ impl UiControl {
 }
 
 fn put_string(bytes: &mut BytesMut, value: &str) -> Result<(), RepositoryError> {
-    let len =
-        u32::try_from(value.len()).map_err(|_| RepositoryError::InvalidUi("string is too long"))?;
+    let len = u32::try_from(value.len())
+        .map_err(|_overflow| RepositoryError::InvalidUi("string is too long"))?;
     bytes.put_u32_le(len);
     bytes.extend_from_slice(value.as_bytes());
     Ok(())
 }
 
 fn put_strings(bytes: &mut BytesMut, values: &[String]) -> Result<(), RepositoryError> {
-    let len =
-        u32::try_from(values.len()).map_err(|_| RepositoryError::InvalidUi("too many items"))?;
+    let len = u32::try_from(values.len())
+        .map_err(|_overflow| RepositoryError::InvalidUi("too many items"))?;
     bytes.put_u32_le(len);
     for value in values {
         put_string(bytes, value)?;
@@ -624,7 +624,7 @@ impl<'a> Cursor<'a> {
         Ok(i64::from_le_bytes(self.array()?))
     }
     fn u8(&mut self) -> Result<u8, DecodeError> {
-        Ok(self.take(1)?[0])
+        Ok(u8::from_le_bytes(self.array()?))
     }
     fn u16(&mut self) -> Result<u16, DecodeError> {
         Ok(u16::from_le_bytes(self.array()?))
@@ -640,7 +640,7 @@ impl<'a> Cursor<'a> {
         self.take(len)
     }
     fn str(&mut self) -> Result<&'a str, DecodeError> {
-        from_utf8(self.bytes()?).map_err(|_| DecodeError)
+        from_utf8(self.bytes()?).map_err(|_invalid_utf8| DecodeError)
     }
     fn string(&mut self) -> Result<String, DecodeError> {
         Ok(self.str()?.to_owned())
@@ -702,7 +702,7 @@ impl<'a> Cursor<'a> {
                 timestamp,
                 bytes,
             },
-            _ => unreachable!("only network event kinds call this decoder"),
+            _ => return Err(DecodeError),
         })
     }
     /// Decodes an optional player record.
@@ -850,6 +850,8 @@ impl<'a> Repository<'a> {
             return Err(RepositoryError::Status(Status::NotInitialized));
         };
         let mut required = 0usize;
+        // SAFETY: the host callback is live; request is readable, required is writable,
+        // and ABI v1 permits a null output with zero length to query the buffer size.
         let status = unsafe {
             query_fn(
                 self.host.context,
@@ -870,6 +872,8 @@ impl<'a> Repository<'a> {
         for _ in 0..3 {
             let mut output = BytesMut::zeroed(required);
             let mut next = required;
+            // SAFETY: request and the initialized output buffer live through the call,
+            // next is writable, and the host callback uses its original context.
             let status = unsafe {
                 query_fn(
                     self.host.context,
@@ -926,7 +930,7 @@ impl<'a> Repository<'a> {
         let bytes = self.query(4, &[])?;
         Cursor(&bytes)
             .string()
-            .map_err(|_| RepositoryError::Malformed)
+            .map_err(|DecodeError| RepositoryError::Malformed)
     }
     /// Reports whether ACT can currently read the chat log.
     pub fn is_chat_log_available(&self) -> Result<bool, RepositoryError> {
@@ -952,9 +956,15 @@ impl<'a> Repository<'a> {
     pub fn antivirus_names(&self) -> Result<Vec<String>, RepositoryError> {
         let bytes = self.query(11, &[])?;
         let mut cursor = Cursor(&bytes);
-        let count = cursor.u32().map_err(|_| RepositoryError::Malformed)? as usize;
+        let count = cursor
+            .u32()
+            .map_err(|DecodeError| RepositoryError::Malformed)? as usize;
         (0..count)
-            .map(|_| cursor.string().map_err(|_| RepositoryError::Malformed))
+            .map(|_| {
+                cursor
+                    .string()
+                    .map_err(|DecodeError| RepositoryError::Malformed)
+            })
             .collect()
     }
     /// Returns the configured game region ID.
@@ -978,12 +988,14 @@ impl<'a> Repository<'a> {
     pub fn combatants(&self) -> Result<Vec<Combatant>, RepositoryError> {
         let bytes = self.query(6, &[])?;
         let mut cursor = Cursor(&bytes);
-        let count = cursor.u32().map_err(|_| RepositoryError::Malformed)? as usize;
+        let count = cursor
+            .u32()
+            .map_err(|DecodeError| RepositoryError::Malformed)? as usize;
         (0..count)
             .map(|_| {
                 cursor
                     .combatant()
-                    .map_err(|_| RepositoryError::Malformed)?
+                    .map_err(|DecodeError| RepositoryError::Malformed)?
                     .ok_or(RepositoryError::Malformed)
             })
             .collect()
@@ -994,7 +1006,7 @@ impl<'a> Repository<'a> {
         let bytes = self.query(7, &[])?;
         Cursor(&bytes)
             .player()
-            .map_err(|_| RepositoryError::Malformed)
+            .map_err(|DecodeError| RepositoryError::Malformed)
     }
 
     /// Returns the requested localized resource dictionary.
@@ -1007,12 +1019,18 @@ impl<'a> Repository<'a> {
     ) -> Result<BTreeMap<u32, String>, RepositoryError> {
         let bytes = self.query(8, &resource_type.to_le_bytes())?;
         let mut cursor = Cursor(&bytes);
-        let count = cursor.u32().map_err(|_| RepositoryError::Malformed)? as usize;
+        let count = cursor
+            .u32()
+            .map_err(|DecodeError| RepositoryError::Malformed)? as usize;
         (0..count)
             .map(|_| {
                 Ok((
-                    cursor.u32().map_err(|_| RepositoryError::Malformed)?,
-                    cursor.string().map_err(|_| RepositoryError::Malformed)?,
+                    cursor
+                        .u32()
+                        .map_err(|DecodeError| RepositoryError::Malformed)?,
+                    cursor
+                        .string()
+                        .map_err(|DecodeError| RepositoryError::Malformed)?,
                 ))
             })
             .collect()
@@ -1027,6 +1045,16 @@ mod tests {
     use std::{ffi::c_void, ptr::copy_nonoverlapping};
 
     use crate::ABI_VERSION;
+
+    #[test]
+    fn cursor_rejects_truncated_bytes_and_non_network_kinds() {
+        Cursor(&[]).u8().unwrap_err();
+        assert_eq!(Cursor(&[42]).u8().unwrap(), 42);
+        // Empty connection and payload still form a complete network wire record.
+        Cursor(&[0; 16])
+            .network_event(EventKind::ZoneChanged)
+            .unwrap_err();
+    }
 
     #[test]
     fn decodes_zone_event_and_subscription_bits() {
@@ -1046,7 +1074,7 @@ mod tests {
                 .contains(SubscriptionSet::LOG_LINE)
         );
         assert!(matches!(EventKind::try_from(5), Ok(EventKind::ZoneChanged)));
-        assert!(EventKind::try_from(u32::MAX).is_err());
+        EventKind::try_from(u32::MAX).unwrap_err();
     }
 
     #[test]
@@ -1093,10 +1121,10 @@ mod tests {
             Ok(Event::Ui(UiEvent::TextChanged { id: 8, text: "ok" }))
         ));
         payload.put_u8(0);
-        assert!(Event::decode(11, &payload).is_err());
-        assert!(Event::decode(11, &[99]).is_err());
-        assert!(Event::decode(11, &[2, 1, 0]).is_err());
-        assert!(Event::decode(11, &[1, 1, 0, 0, 0, 2]).is_err());
+        Event::decode(11, &payload).unwrap_err();
+        Event::decode(11, &[99]).unwrap_err();
+        Event::decode(11, &[2, 1, 0]).unwrap_err();
+        Event::decode(11, &[1, 1, 0, 0, 0, 2]).unwrap_err();
     }
 
     #[test]
@@ -1204,10 +1232,13 @@ mod tests {
         required: *mut usize,
     ) -> Status {
         let value = b"bytes";
+        // SAFETY: Repository::query supplies a live, aligned &mut usize for required.
         unsafe { *required = value.len() };
         if output.is_null() || output_len < value.len() {
             return Status::BufferTooSmall;
         }
+        // SAFETY: the checked output capacity holds value; its heap buffer cannot
+        // overlap this static byte string, and both remain valid during the copy.
         unsafe { copy_nonoverlapping(value.as_ptr(), output, value.len()) };
         Status::Ok
     }
@@ -1223,6 +1254,7 @@ mod tests {
         required: *mut usize,
     ) -> Status {
         EMPTY_CALLS.fetch_add(1, Ordering::SeqCst);
+        // SAFETY: Repository::query supplies a live, aligned &mut usize for required.
         unsafe { *required = 0 };
         Status::Ok
     }
