@@ -90,6 +90,27 @@ The generator reads `Advanced Combat Tracker.exe` and the official SDK's
 `FFXIV_ACT_Plugin.Common.dll`. It does not use `FFXIV_ACT_Plugin.dll` as an input
 or reference.
 
+## Rebuilding managed sources
+
+Use the [.NET 10 SDK's file-based builds](https://learn.microsoft.com/en-us/dotnet/core/sdk/file-based-apps)
+on Windows; no `.csproj` files are needed. `managed/Directory.Build.props` selects
+`.NET Framework 4.8` for ACT compatibility, includes shared UI code, and supplies
+assembly references. Install the .NET Framework 4.8 targeting pack, or allow the
+SDK to restore its reference assemblies from NuGet.
+
+| Command        | Result                                                              |
+| -------------- | ------------------------------------------------------------------- |
+| `task fixture` | Rebuild both embedded contract fixtures                             |
+| `task shim`    | Rebuild `managed/Shim.template.dll` using installed ACT and the SDK |
+| `task ui-test` | Build and run the WinForms checks                                   |
+| `task test`    | Run all three tasks, then Rust tests                                |
+
+For example, `dotnet build managed/Shim.cs --output managed` builds the shim
+directly. By default it references `%APPDATA%\Advanced Combat Tracker\Advanced Combat Tracker.exe`
+and `FFXIV_ACT_Plugin_SDK_3.0.3.1\SDK\FFXIV_ACT_Plugin.Common.dll`. Override these
+paths with the environment variables below. Host assemblies are build references
+and are not copied to the output directory.
+
 ## Testing against an installed SDK
 
 The real-SDK generation test is optional:

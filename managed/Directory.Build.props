@@ -1,0 +1,45 @@
+<Project>
+  <PropertyGroup>
+    <!-- Keep ACT's CLR and hand-written metadata, e.g. Shim.cs version placeholders. -->
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Library</OutputType>
+    <PublishAot>false</PublishAot>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Act.cs'">
+    <AssemblyName>Advanced Combat Tracker</AssemblyName>
+    <TargetExt>.exe</TargetExt>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Common.cs'">
+    <AssemblyName>FFXIV_ACT_Plugin.Common</AssemblyName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Shim.cs'">
+    <AssemblyName>Shim.template</AssemblyName>
+    <FFXIV_ACT_NATIVE_ACT_EXE Condition="'$(FFXIV_ACT_NATIVE_ACT_EXE)' == ''">$(APPDATA)\Advanced Combat Tracker\Advanced Combat Tracker.exe</FFXIV_ACT_NATIVE_ACT_EXE>
+    <FFXIV_ACT_NATIVE_COMMON_DLL Condition="'$(FFXIV_ACT_NATIVE_COMMON_DLL)' == ''">$(MSBuildThisFileDirectory)..\FFXIV_ACT_Plugin_SDK_3.0.3.1\SDK\FFXIV_ACT_Plugin.Common.dll</FFXIV_ACT_NATIVE_COMMON_DLL>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'UiBridgeCheck.cs'">
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Shim.cs' Or '$(MSBuildProjectName)' == 'UiBridgeCheck.cs'">
+    <!-- Include only the shared UI, so e.g. the check's CommonBridge stub stays out of the shim. -->
+    <Compile Include="$(MSBuildThisFileDirectory)UiBridge.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' != 'Common.cs'">
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Shim.cs'">
+    <Reference Include="Advanced Combat Tracker">
+      <HintPath>$(FFXIV_ACT_NATIVE_ACT_EXE)</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="FFXIV_ACT_Plugin.Common">
+      <HintPath>$(FFXIV_ACT_NATIVE_COMMON_DLL)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

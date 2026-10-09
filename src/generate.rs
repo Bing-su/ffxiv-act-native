@@ -683,9 +683,7 @@ mod tests {
 
     #[test]
     #[cfg(windows)]
-    fn managed_template_matches_source_when_csc_is_available() {
-        let csc = PathBuf::from(env::var_os("WINDIR").unwrap_or_default())
-            .join(r"Microsoft.NET\Framework\v4.0.30319\csc.exe");
+    fn managed_template_matches_source_when_dotnet_10_is_available() {
         let act = env::var_os("FFXIV_ACT_NATIVE_ACT_EXE")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
@@ -697,31 +695,35 @@ mod tests {
             .unwrap_or_else(|| {
                 PathBuf::from(r"FFXIV_ACT_Plugin_SDK_3.0.3.1\SDK\FFXIV_ACT_Plugin.Common.dll")
             });
-        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("managed/Shim.cs")
-            .display()
-            .to_string()
-            .replace('/', r"\");
-        let ui_source = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("managed/UiBridge.cs")
-            .display()
-            .to_string()
-            .replace('/', r"\");
-        if !csc.exists() || !act.exists() || !common.exists() {
+        if !act.exists() || !common.exists() {
+            return;
+        }
+        let Ok(sdk) = Command::new("dotnet").arg("--version").output() else {
+            return;
+        };
+        let major = String::from_utf8_lossy(&sdk.stdout)
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .parse::<u32>()
+            .unwrap_or_default();
+        if !sdk.status.success() || major < 10 {
             return;
         }
 
         let directory = env::temp_dir().join(format!("ffxiv-act-native-template-{}", id()));
         std::fs::create_dir_all(&directory).unwrap();
         let output = directory.join("Shim.template.dll");
-        let status = Command::new(csc)
-            .args(["/nologo", "/target:library"])
-            .arg(format!("/out:{}", output.display()))
-            .arg(format!("/reference:{}", act.display()))
-            .arg(format!("/reference:{}", common.display()))
-            .arg("/reference:System.Windows.Forms.dll")
-            .arg(source)
-            .arg(ui_source)
+        let status = Command::new("dotnet")
+            .arg("build")
+            .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("managed/Shim.cs"))
+            .arg("--output")
+            .arg(&directory)
+            .env("FFXIV_ACT_NATIVE_ACT_EXE", act.canonicalize().unwrap())
+            .env(
+                "FFXIV_ACT_NATIVE_COMMON_DLL",
+                common.canonicalize().unwrap(),
+            )
             .status()
             .unwrap();
         assert!(status.success(), "failed to compile managed shim");

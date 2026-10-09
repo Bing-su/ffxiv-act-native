@@ -2,10 +2,6 @@
 
 version: "3"
 
-vars:
-  CSC: '{{ .WINDIR }}\Microsoft.NET\Framework\v4.0.30319\csc.exe'
-  ACT_EXE: '{{ .APPDATA }}\Advanced Combat Tracker\Advanced Combat Tracker.exe'
-
 tasks:
   default:
     deps: [test]
@@ -17,17 +13,17 @@ tasks:
 
   ui-test:
     cmds:
-      - '"{{ .CSC }}" /nologo /target:exe /out:"{{ .TEMP }}\\UiBridgeCheck.exe" /reference:System.Windows.Forms.dll managed\\UiBridge.cs managed\\UiBridgeCheck.cs'
-      - '"{{ .TEMP }}\\UiBridgeCheck.exe"'
+      - dotnet build managed/UiBridgeCheck.cs --output target/managed/ui-test
+      - '"target\\managed\\ui-test\\UiBridgeCheck.exe"'
 
   fixture:
     cmds:
-      - '"{{ .CSC }}" /nologo /target:library /out:"managed\\fixtures\\Advanced Combat Tracker.exe" /reference:System.Windows.Forms.dll managed\\fixtures\\Act.cs'
-      - '"{{ .CSC }}" /nologo /target:library /out:managed\\fixtures\\FFXIV_ACT_Plugin.Common.dll managed\\fixtures\\Common.cs'
+      - dotnet build managed/fixtures/Act.cs --output managed/fixtures
+      - dotnet build managed/fixtures/Common.cs --output managed/fixtures
 
   shim:
     cmds:
-      - '"{{ .CSC }}" /nologo /target:library /out:managed\\Shim.template.dll /reference:"{{ .ACT_EXE }}" /reference:FFXIV_ACT_Plugin_SDK_3.0.3.1\\SDK\\FFXIV_ACT_Plugin.Common.dll /reference:System.Windows.Forms.dll managed\\Shim.cs managed\\UiBridge.cs'
+      - dotnet build managed/Shim.cs --output managed
 
   example:ffxiv-plugin:
     cmds:
